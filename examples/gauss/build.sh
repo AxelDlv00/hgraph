@@ -46,10 +46,10 @@ hg add comment decl:Gauss.isEven_mul_succ --author agent --title "next idea" \
 
 # (e) reviews carry a verdict (good/bad), a quality rating, a title and confidence
 hg add review decl:Gauss.isEven_mul_succ --author reviewer --title "proof gap" \
-   --verdict bad --quality medium --confidence 0.6 \
+   --verdict bad --set quality=medium --confidence 0.6 \
    --content 'statement is right, but the proof is unfinished — needs the parity split.'
 hg add review label:thm:gauss --author human --title "scope" \
-   --verdict good --quality high --confidence high \
+   --verdict good --set quality=high --confidence high \
    --content 'the flagship result — statement is exactly what we want; prioritise it.'
 
 echo; echo "── 3. sync AGAIN — content is re-derived, all of the above survives ──"
