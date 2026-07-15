@@ -1,0 +1,8 @@
+{
+  "name": "hgraph-tools",
+  "private": true,
+  "description": "Node-side helpers for hgraph (KaTeX validation). Optional: hgraph degrades gracefully if this isn't installed.",
+  "dependencies": {
+    "katex": "^0.16.11"
+  }
+}
