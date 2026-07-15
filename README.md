@@ -5,6 +5,9 @@ Markdown/YAML files you (or an agent) write through a CLI, or that `sync`
 generates from a leanblueprint `.tex` + your Lean sources — no database, no logs.
 The files *are* the graph; git versions them.
 
+**[Live demo →](https://axeldlv00.github.io/hgraph/)** — the `gauss` example rendered
+to an interactive blueprint dashboard (built by `bash examples/gauss/build.sh`).
+
 ```
 <project>/hgraph/
   nodes/<id>.md            one file per node: YAML header (metadata) + content body
