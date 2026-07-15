@@ -1,4 +1,0 @@
-# Tells `hgraph sync` (run with no flags) where this project's sources live.
-# Paths are relative to the project root (the dir that contains hgraph/).
-blueprint: blueprint/blueprint.tex
-lean: [Lean]
