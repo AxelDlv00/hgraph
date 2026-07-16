@@ -423,10 +423,27 @@ def _copy_webui(out_dir: Path) -> None:
     The output dir is very often the project itself (``hgraph site --out
     index.html`` from a project root, as the examples' build.sh does), so
     ``out_dir/assets`` can be a directory the user keeps their own files in —
-    a card picture, say. Overwrite what we ship and leave everything else
-    alone: a stale bundle from an older build is harmless (its name is content-
-    hashed, and index.html only ever references the current one), whereas
-    deleting a file we didn't write is not."""
+    a card picture, say. We overwrite what we ship and leave everything else
+    alone, rather than ``rmtree``-ing the whole dir (which once ate a card image
+    a user had put there).
+
+    But our *own* files are content-hashed (``assets/index-<hash>.js`` etc.), so
+    a plain merge leaves last build's bundle behind next to this one — harmless
+    to the page (index.html names only the current hash) but, in a committed
+    ``docs/`` that is rebuilt over and over, an ever-growing pile of orphans.
+    So we prune stale copies of *our* hashed bundles first — matched by the
+    exact naming Vite gives them — while still never touching a name we don't
+    recognise as ours."""
+    # our shipped files, and the hashed-bundle names to prune when orphaned
+    shipped = {src.relative_to(WEBUI_DIR)
+               for src in WEBUI_DIR.rglob("*") if src.is_file()}
+    ours = re.compile(r"^(index|viz)-[A-Za-z0-9_-]+\.(js|css)$")
+    assets = out_dir / "assets"
+    if assets.is_dir():
+        for f in assets.iterdir():
+            if f.is_file() and ours.match(f.name) and Path("assets", f.name) not in shipped:
+                f.unlink()
+
     for src in WEBUI_DIR.rglob("*"):
         rel = src.relative_to(WEBUI_DIR)
         if rel.parts[0] == "index.html":                 # injected separately, below
