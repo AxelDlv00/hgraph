@@ -23,7 +23,8 @@ or `GET /api/site`) and `ProjectData` (`<root>/data.json`, written by
 shapes; every bit of rendering — math (`katex/contrib/auto-render`), Lean
 code, dependency chips, the review form — lives here.
 
-Scope note: the project view (`ProjectView.tsx`) covers statements, Lean
-code, dependencies, and reviews/comments. Deliberately not (yet) ported from
-the old Python renderer: the interactive dependency-graph visualization,
-hover-preview popups, a search/filter sidebar, and bibliography rendering.
+Scope note: the project view (`ProjectView.tsx`) covers everything the old
+Python renderer did — statements, Lean code, dependencies, reviews/comments,
+the interactive dependency-graph modal (`GraphModal.tsx`, Graphviz-as-WASM in
+a Web Worker), hover-preview popups (`HoverPreview.tsx`), the search/filter
+sidebar, and bibliography rendering (`Bibliography.tsx`).

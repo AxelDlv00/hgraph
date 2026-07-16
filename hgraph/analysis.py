@@ -66,8 +66,14 @@ class Analysis:
                         continue
                     if not self.local[u]:
                         closed[u] = False
-                    else:                       # closed iff every dep resolved & closed
-                        closed[u] = all(color[v] != GREY and closed.get(v, False)
+                    else:
+                        # closed iff every dep resolved & closed. A GREY dep is
+                        # a cycle back-edge: count it as its own *local* state,
+                        # matching layout._closures and the frontend's closure —
+                        # otherwise a fully-formalized cyclic cluster reads
+                        # "done" in the web graph but "open" in the CLI.
+                        closed[u] = all((self.local[v] if color[v] == GREY
+                                         else closed.get(v, False))
                                         for v in self.deps[u])
                     color[u] = BLACK
         return closed

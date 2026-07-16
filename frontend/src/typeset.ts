@@ -19,6 +19,22 @@ const DELIMITERS = [
   { left: '$', right: '$', display: false },
 ];
 
+// ONE shared, mutable macros object per project (\Spec, \Pic, …), registered
+// by ProjectView when its data loads. Shared + mutable on purpose, combined
+// with KaTeX's `globalGroup` below: a blueprint that defines a macro inside
+// math (`$\def\R{\mathbb R}$` early in the document — a common pattern)
+// needs that definition to persist into every LATER block, exactly as it
+// would in real LaTeX and as the old one-pass-over-the-whole-page dashboard
+// behaved. Per-call fresh objects silently dropped those, leaving raw LaTeX
+// in every block that used them. Callers that don't thread a `macros` prop
+// (chapter/TOC/overview/summary titles, the bibliography) get project macros
+// through this too.
+const BUILTIN = { '\\mbox': '\\text', '\\hbox': '\\text' };
+let sessionMacros: Record<string, string> = { ...BUILTIN };
+export function setDefaultMacros(m?: Record<string, string> | null): void {
+  sessionMacros = { ...BUILTIN, ...m };
+}
+
 // What each element's first child was right after its last typeset. React 19
 // re-sets `dangerouslySetInnerHTML` children on ANY re-render of the element
 // — even when `__html` is the identical string — silently reverting KaTeX's
@@ -34,12 +50,16 @@ const lastTypeset = new WeakMap<HTMLElement, Node | null>();
  * (`throwOnError: false`, plus a belt-and-braces catch). */
 export function typesetMath(el: HTMLElement, macros?: Record<string, string>): void {
   if (lastTypeset.has(el) && lastTypeset.get(el) === el.firstChild) return;
+  if (macros) Object.assign(sessionMacros, macros);
   getRenderer().then((render) => {
     if (!el.isConnected) return; // unmounted while KaTeX was still loading
     try {
       render(el, {
         delimiters: DELIMITERS,
-        macros: { '\\mbox': '\\text', '\\hbox': '\\text', ...macros },
+        // the SHARED object + globalGroup: \def/\newcommand made inside one
+        // block's math are written back into it and persist for later blocks
+        macros: sessionMacros,
+        globalGroup: true,
         throwOnError: false,
       });
     } catch {

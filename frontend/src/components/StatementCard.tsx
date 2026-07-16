@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Entry, ReviewData, Dep, RefEntry } from '../types';
-import type { CiteNums } from '../latex';
+import { leanHi, type CiteNums } from '../latex';
 import { Math as Tex } from './Tex';
 import { StatusBadge } from './StatusBadge';
 import { ReviewForm } from './ReviewForm';
@@ -12,13 +12,26 @@ const ABBR: Record<string, string> = {
   proof: 'Proof', quote: 'Quote', instance: 'Instance',
 };
 
-function DepList({ deps, label, macros }: { deps: Dep[]; label: string; macros: Record<string, string> }) {
+function DepList({
+  deps,
+  label,
+  macros,
+  onNavigate,
+}: {
+  deps: Dep[];
+  label: string;
+  macros: Record<string, string>;
+  onNavigate?: (id: string) => void;
+}) {
   if (!deps.length) return null;
   return (
     <div className="deps-row">
       <span className="deps-label">{label}</span>
       {deps.map((d) => (
-        <a key={d.id} href={`#stmt-${d.id}`} className="dep-chip">
+        // no href — a real "#stmt-<id>" fragment would clobber the app's
+        // "#/<root>#<locator>" hash route and 404 the whole SPA; chips select
+        // within the current panel instead
+        <a key={d.id} className="dep-chip" onClick={() => onNavigate?.(d.id)}>
           <Tex as="span" text={d.title || d.label || d.id} macros={macros} />
         </a>
       ))}
@@ -79,14 +92,15 @@ export function StatementCard({
                 <code>{l.name}</code>
                 <StatusBadge status={l.status} />
               </div>
-              {l.code && <pre className="lean-code">{l.code}</pre>}
+              {/* leanHi escapes the code before adding highlight spans */}
+              {l.code && <pre className="lean-code" dangerouslySetInnerHTML={{ __html: leanHi(l.code) }} />}
             </div>
           ))}
         </div>
       )}
 
-      <DepList deps={entry.deps} label="uses" macros={macros} />
-      <DepList deps={usedBy} label="used by" macros={macros} />
+      <DepList deps={entry.deps} label="uses" macros={macros} onNavigate={onNavigate} />
+      <DepList deps={usedBy} label="used by" macros={macros} onNavigate={onNavigate} />
 
       <h3>Dependencies</h3>
       <div dangerouslySetInnerHTML={{ __html: localDepGraph(entry, ups, downs, true) }} />

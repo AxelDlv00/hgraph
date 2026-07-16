@@ -1,9 +1,8 @@
 ---
 author: human
-confidence: high
-date: '2026-07-09T16:00:06'
-quality: high
-title: scope
-verdict: good
+created: '2026-07-16T16:38:52'
+date: '2026-07-16T16:38:52'
+maths_comment: the flagship result — prioritise it.
+maths_verdict: good
+updated: '2026-07-16T16:38:52'
 ---
-the flagship result — statement is exactly what we want; prioritise it.

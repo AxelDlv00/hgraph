@@ -54,7 +54,10 @@ export default function App() {
       .catch((e) => setError(String(e)));
   }, [data, projectRoot]);
 
-  if (projectRoot) return <ProjectView root={projectRoot} initialLocator={locator} />;
+  // key by root: switching projects must reset every bit of view state
+  // (current chapter, filters, selection) — carrying chapter index 7 into a
+  // 3-chapter project would render chapters[7] and crash
+  if (projectRoot) return <ProjectView key={projectRoot} root={projectRoot} initialLocator={locator} />;
   if (error) return <div className="page-error">Couldn't load the workspace: {error}</div>;
   if (!data) return <div className="page-loading">Loading…</div>;
   return <Landing data={data} />;

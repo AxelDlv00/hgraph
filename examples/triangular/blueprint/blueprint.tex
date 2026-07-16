@@ -1,0 +1,57 @@
+\documentclass{article}
+% A leanblueprint-style source, same conventions as examples/gauss. This one is
+% designed to exercise the schema fields the gauss example doesn't: several
+% content_types (proposition, corollary, example, remark, conjecture), Lean
+% instances, and a range of `origin` values.
+\usepackage{leanblueprint}
+\begin{document}
+
+\section{Triangular numbers}
+
+\begin{definition}[Triangular number]\label{def:triangular}\lean{Triangular.IsTriangular}\leanok
+A natural number $m$ is \emph{triangular} if $m = T_n := 1 + 2 + \cdots + n$
+for some $n$.
+\end{definition}
+
+\begin{theorem}[Closed form]\label{thm:triangular-closed-form}\lean{Triangular.closed_form}\uses{def:triangular}\leanok
+$2T_n = n(n+1)$.
+\end{theorem}
+\begin{proof}\uses{def:triangular}
+By induction on $n$: $T_0 = 0$, and $T_{n+1} = T_n + (n+1)$ splits off the
+last term.
+\end{proof}
+
+\begin{proposition}[Consecutive triangular numbers sum to a square]\label{prop:triangular-consecutive-sum}\uses{thm:triangular-closed-form}
+$T_{n-1} + T_n = n^2$ for every $n \geq 1$.
+\end{proposition}
+\begin{proof}\uses{thm:triangular-closed-form}
+Substitute the closed form for both terms and simplify.
+\end{proof}
+
+\begin{corollary}[Parity of triangular numbers]\label{cor:triangular-even-odd}\uses{thm:triangular-closed-form}
+$T_n$ is even iff $n \equiv 0$ or $n \equiv 3 \pmod 4$.
+\end{corollary}
+\begin{proof}\uses{thm:triangular-closed-form}
+Immediate from the closed form: $n(n+1)$ is divisible by $4$ exactly in
+those residue classes.
+\end{proof}
+
+\begin{example}[$T_5$]\label{ex:triangular-five}\uses{def:triangular}
+$T_5 = 1+2+3+4+5 = 15$.
+\end{example}
+
+\begin{remark}[Pascal's triangle]\label{rem:pascal}\uses{def:triangular}
+The triangular numbers are the third diagonal of Pascal's triangle:
+$T_n = \binom{n+1}{2}$.
+\end{remark}
+
+\begin{conjecture}[Illustrative only]\label{conj:square-triangular}
+As a placeholder for the \texttt{conjecture} content type: infinitely many
+triangular numbers are also perfect squares, as discussed in \cite{pell1996equation}.
+(This is in fact a theorem, provable via Pell's equation — kept as a
+\texttt{conjecture} here only to demonstrate the field, not because the claim
+is open.) See also \cite{conway1996book} for background on classical figurate
+numbers.
+\end{conjecture}
+
+\end{document}

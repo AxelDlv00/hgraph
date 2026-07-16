@@ -52,7 +52,9 @@ export function Bibliography({
   flashKey?: string | null;
 }) {
   const cites = new Map<string, string[]>();
-  const cre = /\\cite[tp]?\*?\{([^{}]*)\}/g;
+  // keep in step with latex.ts's \cite rule: every natbib variant
+  // (\citet, \citealp, \citeauthor, …) plus an optional [page] argument
+  const cre = /\\cite[a-zA-Z]*\*?(?:\[[^\]]*\])?\{([^{}]*)\}/g;
   for (const e of entries) {
     cre.lastIndex = 0;
     let m: RegExpExecArray | null;

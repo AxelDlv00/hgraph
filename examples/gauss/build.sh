@@ -16,7 +16,7 @@ hg() { python3 -m hgraph "$@"; }
 echo "── 1. sync: parse the blueprint + Lean sources into the graph ──"
 hg sync                            # no flags → reads hgraph/config.yaml for the paths
 #   → blueprint nodes (keyed by \label), Lean nodes (keyed by fq-name),
-#     formalizes edges (\lean), depends_on (statement \uses), uses (proof \uses).
+#     formalizes edges (\lean), uses edges (statement/proof \uses, collapsed).
 #   Note Gauss.isEven_zero becomes a Lean node with no blueprint match.
 
 echo; echo "── 2. a human/agent layers on what the sources can't hold ──"
@@ -36,7 +36,7 @@ hg add node --title "Consecutive-integer product is even" --type tex --key even-
    --author human --origin book --set 'origin_details={work: Concrete Mathematics, page: 51}' \
    --set 'tags=[source]' \
    --content 'The product of consecutive integers is always even.'
-hg add edge label:lem:mul-succ key:even-quote --type quote
+hg add edge label:lem:mul-succ key:even-quote --type related_to
 
 # (d) failure memory — two comments (a progression) on the still-sorried lemma
 hg add comment decl:Gauss.isEven_mul_succ --author agent --title "first attempt" \
@@ -44,20 +44,20 @@ hg add comment decl:Gauss.isEven_mul_succ --author agent --title "first attempt"
 hg add comment decl:Gauss.isEven_mul_succ --author agent --title "next idea" \
    --content 'case on Nat.even_or_odd n; the odd case makes n+1 even, then ring.'
 
-# (e) reviews carry a verdict (good/bad), a quality rating, a title and confidence
-hg add review decl:Gauss.isEven_mul_succ --author reviewer --title "proof gap" \
-   --verdict bad --set quality=medium --confidence 0.6 \
-   --content 'statement is right, but the proof is unfinished — needs the parity split.'
-hg add review label:thm:gauss --author human --title "scope" \
-   --verdict good --set quality=high --confidence high \
-   --content 'the flagship result — statement is exactly what we want; prioritise it.'
+# (e) reviews are two axes — Maths good/bad + comment, Lean good/bad + comment —
+#     either or both may be set
+hg add review decl:Gauss.isEven_mul_succ --author reviewer \
+   --maths good --maths-comment 'the statement is exactly what we want.' \
+   --lean bad --lean-comment 'proof is unfinished — needs the parity split.'
+hg add review label:thm:gauss --author human \
+   --maths good --maths-comment 'the flagship result — prioritise it.'
 
 echo; echo "── 3. sync AGAIN — content is re-derived, all of the above survives ──"
 hg sync
 
 echo; echo "════════ get the sorried lemma's Lean side (2 comments + a review) ════════"
 hg get decl:Gauss.isEven_mul_succ
-#   re-derived body + lean_status, the preserved comments/review, formalizes/quote.
+#   re-derived body + lean_status, the preserved comments/review, formalizes/related_to.
 
 echo; echo "════════ get the theorem (status, tags, origin, review, provenance) ════════"
 hg get label:thm:gauss
@@ -70,3 +70,15 @@ hg ancestors label:thm:gauss --names
 
 echo; echo "════════ union view (blueprint ↔ Lean merged by 'formalizes') ════════"
 hg view union
+
+echo; echo "── 4. the site — one command, project view included, even solo ──"
+# Everything generated goes under _site/ (gitignored): the example dir itself
+# holds only sources. The workspace build at the repo root (`hgraph site`, see
+# ../../config.yaml) renders this project too and is what GitHub Pages deploys —
+# this solo page is just the "a lone project needs no manifest" demo.
+hg site --out _site/index.html
+
+echo; echo "view it:"
+echo "  open directly:   xdg-open $HERE/_site/index.html"
+echo "  or serve a dir:  (cd $HERE/_site && python -m http.server 8000)  → http://localhost:8000/"
+echo "  the whole workspace: (cd $(cd "$HERE/../.." && pwd) && hgraph serve)"

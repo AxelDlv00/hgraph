@@ -1,0 +1,12 @@
+# Tells `hgraph sync` (run with no flags) where this project's sources live.
+# Paths are relative to the project root (the dir that contains hgraph/).
+blueprint: blueprint/blueprint.tex
+lean: [Lean]
+
+# Tells a bare `hgraph site` (no --manifest) how to build this solo project's
+# index.html landing page — see hgraph.site's docstring.
+site:
+  title: Triangular numbers
+  subtitle: A small example exercising the rest of the schema (content types, origins, stale nodes, reviews)
+  overview: overview.md
+  repo: AxelDlv00/hgraph

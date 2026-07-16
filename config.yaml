@@ -1,0 +1,23 @@
+# Workspace manifest for `hgraph site` (run with no --manifest from the repo
+# root, this is what it finds). Builds the landing page deployed to GitHub
+# Pages — see .github/workflows/pages.yml.
+brand: hgraph          # the sticky header's name; falls back to `title` if unset
+title: hgraph examples
+subtitle: A plain-files semantic graph for autoformalization — two small worked examples
+overview: overview.md
+projects:
+  - name: Gauss summation
+    root: examples/gauss
+    # NB: not examples/gauss/assets/ — that dir is `hgraph site` output and is
+    # gitignored, so a picture there is neither committed nor deployed.
+    image: examples/gauss/img/gauss.jpg
+    image_alt: Portrait of Gauss
+    image_offset: 50
+    category: Sync workflow
+    tag: sync + Lean
+    blurb: The blueprint + Lean sources are the reference; sync parses them, then a human/agent layers on provenance, comments, and reviews.
+  - name: Triangular numbers
+    root: examples/triangular
+    category: Schema reference
+    tag: full schema
+    blurb: Every content_type, a wide origin spread, a stale-node demo, a related_to edge, and the two-axis Maths/Lean review shape.

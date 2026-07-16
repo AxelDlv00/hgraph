@@ -10,6 +10,7 @@ import { GraphModal } from './GraphModal';
 import { Summary } from './Summary';
 import { Bibliography } from './Bibliography';
 import { citeNums, plainTex } from '../latex';
+import { setDefaultMacros } from '../typeset';
 
 // how many search results render at once — past this, a broad query (one
 // letter, or a bare status chip on a large blueprint) would typeset hundreds
@@ -52,6 +53,13 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
   // `renderOverview()` — a specific chapter's full prose ("doc") is one
   // click away, not the default.
   const [view, setView] = useState<ViewName>('overview');
+
+  // project macros apply to every typeset on the page, including titles that
+  // don't thread a macros prop (TOC, overview, summary, bibliography)
+  useEffect(() => {
+    setDefaultMacros(data?.macros);
+    return () => setDefaultMacros(null);
+  }, [data]);
 
   useEffect(() => {
     setData(null);
@@ -165,7 +173,10 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     const byLabel = data.entries.find((e) => e.label === h);
     const id = data.entries.some((e) => e.id === h) ? h : byLabel?.id;
     if (id) navigate(id);
-  }, [data]);
+    // re-run on locator changes too: an external link can change just the
+    // "#…#<locator>" part while staying in the same project (our own setHash
+    // uses replaceState, which fires no hashchange, so it never loops this)
+  }, [data, initialLocator]);
 
   function toggleStatus(s: string) {
     setView('doc');
@@ -249,7 +260,9 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
 
   return (
     <div className="project-page">
-      <HoverPreview data={data} root={root} onNavigate={navigate} />
+      {/* while the graph modal is open, clicks in its pinned mini-graph popup
+          must select within the modal, not silently change the doc view behind it */}
+      <HoverPreview data={data} root={root} onNavigate={graphOpen ? setGraphSelectedId : navigate} />
       {graphOpen && (
         <GraphModal
           data={data}
@@ -321,6 +334,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
                   key={b.id}
                   b={b}
                   refs={refs}
+                  cites={cites}
                   macros={data.macros}
                   usedByCount={(b.id && usedByCounts.get(b.id)) || 0}
                   selected={selectedId === b.id}

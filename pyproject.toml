@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=61"]
+# >=62.3: first release where package-data globs recurse (`webui/**`) — older
+# setuptools silently ships index.html without the assets/ bundle
+requires = ["setuptools>=62.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,8 +12,19 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["PyYAML>=5.1"]
 
+[project.optional-dependencies]
+# Lets `hgraph site`/`serve` downscale project-card pictures to card size
+# before inlining them. Without it a big photo is still inlined, just as-is.
+images = ["Pillow>=9"]
+
 [project.scripts]
 hgraph = "hgraph.cli:main"
 
 [tool.setuptools]
 packages = ["hgraph"]
+
+# hgraph/webui/ is the pre-built React/Vite landing-page frontend (built from
+# frontend/ — see frontend/README-DEV.md). Shipped as package data so
+# `pip install hgraph` never requires Node.js.
+[tool.setuptools.package-data]
+hgraph = ["webui/**"]

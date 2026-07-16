@@ -45,7 +45,18 @@ export function ProjectCard({ p, theme }: { p: ProjectCardData; theme: Theme }) 
         )}
         <span className="card-links">
           {(p.links || []).map((l, i) => (
-            <span key={i} style={{ color: theme.accent }}>
+            // not a real <a>: the whole card is one, and nesting anchors is
+            // invalid HTML — open the manifest's href without following the card
+            <span
+              key={i}
+              role="link"
+              style={{ color: theme.accent, textDecoration: 'underline', cursor: 'pointer' }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.open(l.href, '_blank', 'noopener');
+              }}
+            >
               {l.label}
             </span>
           ))}

@@ -131,7 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
     ae = add.add_parser("edge", help="add an edge")
     ae.add_argument("source")
     ae.add_argument("target")
-    ae.add_argument("--type", required=True, help="depends_on, formalizes, quote, ...")
+    ae.add_argument("--type", required=True, help="uses (hard), formalizes (identity), related_to (associative)")
     g = ae.add_mutually_exclusive_group()
     g.add_argument("--hard", action="store_true", help="force dependency edge")
     g.add_argument("--soft", action="store_true", help="force semantic (non-dep) edge")
@@ -140,18 +140,22 @@ def build_parser() -> argparse.ArgumentParser:
                          "(only one edge is kept per pair)")
     ae.add_argument("--set", action="append", metavar="k=v")
 
-    for kind in ("comment", "review"):
-        ak = add.add_parser(kind, help=f"attach a {kind} to a node")
-        ak.add_argument("target")
-        ak.add_argument("--content")
-        ak.add_argument("--content-file")
-        ak.add_argument("--author")
-        ak.add_argument("--title", help="short heading for the note")
-        ak.add_argument("--confidence", help="e.g. 0.8, high, low")
-        ak.add_argument("--set", action="append", metavar="k=v", help="extra metadata")
-        if kind == "review":
-            ak.add_argument("--verdict", choices=["good", "bad"],
-                            help="is the reviewed node good or not")
+    ac = add.add_parser("comment", help="attach a freeform comment to a node")
+    ac.add_argument("target")
+    ac.add_argument("--content")
+    ac.add_argument("--content-file")
+    ac.add_argument("--author")
+    ac.add_argument("--title", help="short heading for the note")
+    ac.add_argument("--set", action="append", metavar="k=v", help="extra metadata")
+
+    ar = add.add_parser("review", help="attach a Maths/Lean good-or-bad review to a node")
+    ar.add_argument("target")
+    ar.add_argument("--author")
+    ar.add_argument("--maths", choices=["good", "bad"], help="is the mathematics right")
+    ar.add_argument("--maths-comment", dest="maths_comment")
+    ar.add_argument("--lean", choices=["good", "bad"], help="is the Lean formalization right")
+    ar.add_argument("--lean-comment", dest="lean_comment")
+    ar.add_argument("--set", action="append", metavar="k=v", help="extra metadata")
 
     # ---- get / modify / delete / list ------------------------------------ #
     gp = sub.add_parser("get", help="render a node (content + links + deps + notes)")
@@ -232,33 +236,28 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("--lean", action="append", default=[], metavar="PATH",
                     help="a .lean file or a directory of them (repeatable)")
 
-    db = sub.add_parser("dashboard", help="write a blueprint dashboard (HTML)")
-    db.add_argument("--out", default="dashboard.html", help="output HTML path")
-    db.add_argument("--title", default="Blueprint")
-    db.add_argument("--macros", help="a .sty/.tex preamble to lift KaTeX macros from")
-    db.add_argument("--self-contained", action="store_true", dest="self_contained",
-                    help="inline KaTeX + fonts so math renders with no network")
-    db.add_argument("--no-katex-check", action="store_true", dest="no_katex_check",
-                    help="skip validating every math span against real KaTeX (saves a few seconds)")
-    db.add_argument("--home", help="URL for a 'back to all projects' link in the header "
-                    "(e.g. ../ when this dashboard sits one level under a landing page)")
+    st = sub.add_parser("site", help="write a landing index.html (multi-project from a "
+                        "manifest, or a solo project's own hgraph/config.yaml)")
+    st.add_argument("--manifest", help="YAML manifest listing the projects (see "
+                    "hgraph.site docstring); default: ./config.yaml, else a solo "
+                    "project synthesized from hgraph/config.yaml's site: block")
+    st.add_argument("--out", default="_site/index.html",
+                    help="output HTML path; the bundle and each project's "
+                         "data.json land beside it (default: _site/index.html, "
+                         "so generated files never mix into your sources)")
+    st.add_argument("--overview", help="a Markdown or HTML fragment to inject as the hero "
+                    "(overrides the manifest's/config's `overview:` key)")
 
-    st = sub.add_parser("site", help="write a multi-project landing index.html from a manifest")
-    st.add_argument("--manifest", required=True,
-                    help="YAML manifest listing the projects (see hgraph.site docstring)")
-    st.add_argument("--out", default="index.html", help="output HTML path")
-    st.add_argument("--overview", help="a bespoke HTML fragment to inject as the hero "
-                    "(overrides the manifest's `overview:` key)")
-
-    sv = sub.add_parser("serve", help="serve the dashboard live (review/comment write-back)")
+    sv = sub.add_parser("serve", help="serve the site live (review/comment write-back); "
+                        "a workspace config.yaml serves the whole site, live")
     sv.add_argument("--port", type=int, default=8000)
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--title", default="Blueprint")
     sv.add_argument("--macros", help="a .sty/.tex preamble to lift KaTeX macros from")
-    sv.add_argument("--self-contained", action="store_true", dest="self_contained",
-                    help="inline KaTeX + fonts (no network needed in the browser)")
-    sv.add_argument("--no-katex-check", action="store_true", dest="no_katex_check",
-                    help="skip validating every math span against real KaTeX at startup (saves a few seconds)")
+    sv.add_argument("--repo", help="owner/name — shown alongside the live review form "
+                    "(default: hgraph/config.yaml's site.repo)")
+    sv.add_argument("--manifest", help="serve a whole workspace (see `hgraph site`) instead "
+                    "of one project; default: auto-detect ./config.yaml")
 
     return p
 
@@ -283,15 +282,23 @@ def main(argv=None) -> int:
                              args.type, hard=hard, replace=args.replace,
                              **_kv(args.set, {"source", "target", "type", "hard"})))
 
-        elif args.cmd == "add" and args.what in ("comment", "review"):
+        elif args.cmd == "add" and args.what == "comment":
             c = _content(args)
             if not c:
-                raise SystemExit(f"{args.what} needs --content or --content-file")
-            extra = {"title": args.title,
-                     "confidence": _scalar(args.confidence),
-                     "verdict": getattr(args, "verdict", None),
-                     **_kv(args.set, {"author", "title", "confidence", "verdict"})}
-            print(g.add_attachment(g.resolve(args.target), args.what, c,
+                raise SystemExit("comment needs --content or --content-file")
+            extra = {"title": args.title, **_kv(args.set, {"author", "title"})}
+            print(g.add_attachment(g.resolve(args.target), "comment", c,
+                                   author=args.author,
+                                   **{k: v for k, v in extra.items() if v is not None}))
+
+        elif args.cmd == "add" and args.what == "review":
+            if not args.maths and not args.lean:
+                raise SystemExit("review needs --maths good|bad and/or --lean good|bad")
+            extra = {"maths_verdict": args.maths, "maths_comment": args.maths_comment,
+                     "lean_verdict": args.lean, "lean_comment": args.lean_comment,
+                     **_kv(args.set, {"author", "maths_verdict", "maths_comment",
+                                      "lean_verdict", "lean_comment"})}
+            print(g.add_attachment(g.resolve(args.target), "review", "",
                                    author=args.author,
                                    **{k: v for k, v in extra.items() if v is not None}))
 
@@ -300,8 +307,12 @@ def main(argv=None) -> int:
             _emit_json(get_json(g, nid)) if args.json else print(render_get(g, nid))
 
         elif args.cmd == "modify":
+            # same reservation `add node` applies: title/type/content have
+            # real flags; letting --set title=x write them through set_meta
+            # would silently shadow the node's actual title field
             g.modify_node(g.resolve(args.id), title=args.title, type=args.type,
-                          content=_content(args), set_meta=_kv(args.set),
+                          content=_content(args),
+                          set_meta=_kv(args.set, {"title", "type", "content", "id"}),
                           unset=args.unset)
             print(f"modified {args.id}")
 
@@ -430,25 +441,62 @@ def main(argv=None) -> int:
             for w in r["warnings"]:
                 print(f"  warning: {w}", file=sys.stderr)
 
-        elif args.cmd == "dashboard":
-            from .dashboard import build_dashboard
-            html = build_dashboard(g, title=args.title, macros_from=args.macros,
-                                   self_contained=args.self_contained, root=args.root,
-                                   validate_katex=not args.no_katex_check, home=args.home)
-            Path(args.out).write_text(html, encoding="utf-8")
-            print(f"wrote {args.out} ({len(html)//1024} KB)")
-
         elif args.cmd == "site":
-            from .site import build_from_manifest
-            html = build_from_manifest(args.manifest, overview_path=args.overview)
-            Path(args.out).write_text(html, encoding="utf-8")
-            print(f"wrote {args.out} ({len(html)//1024} KB)")
+            from .site import looks_like_manifest, write_from_manifest, write_solo
+            root = Path(args.root)
+            workspace = root / "config.yaml"
+            out_path = Path(args.out)
+            # only auto-adopt ./config.yaml if it really is an hgraph manifest —
+            # the name is shared with other tools (see looks_like_manifest)
+            auto = workspace.exists() and looks_like_manifest(workspace)
+            if args.manifest:
+                write_from_manifest(args.manifest, out_path=out_path, overview_path=args.overview)
+            elif auto:
+                write_from_manifest(workspace, out_path=out_path, overview_path=args.overview)
+            else:
+                from .sync import load_config
+                site_cfg = load_config(args.root).get("site") or {}
+                if not site_cfg:
+                    why = ("./config.yaml is not an hgraph manifest (no `projects:` list "
+                           "of entries with a `root:`)" if workspace.exists() else
+                           "no --manifest and no ./config.yaml")
+                    print(f"nothing to build a site from: {why}, "
+                          "and no site: block in hgraph/config.yaml.\n"
+                          "  pass e.g.  hgraph site --manifest workspace.yaml\n"
+                          "  or add a `site:` block to <root>/hgraph/config.yaml.",
+                          file=sys.stderr)
+                    return 2
+                write_solo(site_cfg, root=root, out_path=out_path, overview_path=args.overview)
+            print(f"wrote {out_path} (+ assets/)")
 
         elif args.cmd == "serve":
-            from .server import serve
-            serve(g, host=args.host, port=args.port, title=args.title,
-                  macros_from=args.macros, self_contained=args.self_contained,
-                  root=args.root, validate_katex=not args.no_katex_check)
+            from .site import looks_like_manifest
+            root = Path(args.root)
+            workspace = Path(args.manifest) if args.manifest else (root / "config.yaml")
+            # same rule as `site`: a ./config.yaml belonging to another tool is
+            # not a workspace — fall through and serve the solo project
+            if args.manifest or (workspace.exists() and looks_like_manifest(workspace)):
+                from .server import serve_workspace
+                manifest = yaml.safe_load(workspace.read_text(encoding="utf-8")) or {}
+                serve_workspace(manifest, workspace.parent, host=args.host, port=args.port)
+            elif not (root / "hgraph").is_dir():
+                # Neither a workspace nor a project. `Graph.open` is happy to
+                # hand back an empty graph here, which would serve a blank page
+                # titled "Blueprint" and leave the user hunting for their
+                # projects — say what's wrong instead.
+                what = ("./config.yaml is not an hgraph manifest (no `projects:` list of "
+                        "entries with a `root:`)" if workspace.exists() and not args.manifest
+                        else "no --manifest was given")
+                print(f"nothing to serve: {what}, and {root}/ is not an hgraph project "
+                      "either (no hgraph/ directory).\n"
+                      "  a workspace:  hgraph serve --manifest site.yaml\n"
+                      "  one project:  cd <project> && hgraph serve",
+                      file=sys.stderr)
+                return 2
+            else:
+                from .server import serve
+                serve(g, host=args.host, port=args.port, title=args.title,
+                      macros_from=args.macros, root=args.root, repo=args.repo)
 
     except HGraphError as e:
         print(f"error: {e}", file=sys.stderr)

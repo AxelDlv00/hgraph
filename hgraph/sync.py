@@ -26,6 +26,7 @@ the string the Lean node is keyed on, so ``sync`` needs no cross-reference index
 from __future__ import annotations
 
 import re
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import yaml
@@ -34,18 +35,25 @@ from .graph import Graph, node_id
 
 
 def load_config(root: str | Path) -> dict:
-    """Read ``<root>/hgraph/config.yaml`` if present, so a bare ``sync`` knows
-    where the sources are. Recognised keys (paths are relative to ``<root>``)::
+    """Read ``<root>/hgraph/config.yaml`` if present, so a bare ``sync`` (or
+    ``dashboard``/``site``) knows where things are. Recognised keys (paths are
+    relative to ``<root>``)::
 
         blueprint: blueprint/blueprint.tex
         lean: [Lean]                 # a path or a list of paths
+        site:                        # optional — see hgraph.site's docstring
+          title: ...
+          subtitle: ...
+          overview: overview.md
+          repo: owner/name
 
-    Returns ``{"blueprint": <abs path or None>, "lean": [<abs path>, ...]}``.
+    Returns ``{"blueprint": <abs path or None>, "lean": [<abs path>, ...],
+    "site": <the site: block, verbatim, or {}>}``.
     """
     root = Path(root)
     p = root / "hgraph" / "config.yaml"
     if not p.exists():
-        return {"blueprint": None, "lean": []}
+        return {"blueprint": None, "lean": [], "site": {}}
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     bp = data.get("blueprint")
     lean = data.get("lean") or []
@@ -54,6 +62,7 @@ def load_config(root: str | Path) -> dict:
     return {
         "blueprint": str(root / bp) if bp else None,
         "lean": [str(root / l) for l in lean],
+        "site": data.get("site") or {},
     }
 
 # ── blueprint theorem-like environments → content_type ─────────────────────── #
@@ -76,8 +85,8 @@ LEAN_KINDS = {
     "abbrev": "definition", "instance": "instance",
 }
 # when several edges land on one ordered pair, the strongest type wins
-# (statement `depends_on` subsumes proof `uses`); higher rank = stronger.
-_EDGE_RANK = {"depends_on": 3, "imports": 3, "uses": 2, "formalizes": 1}
+# (the hard `uses` edge subsumes the soft `formalizes` one); higher rank wins.
+_EDGE_RANK = {"uses": 2, "formalizes": 1}
 _DECL_RE = re.compile(
     r"^\s*(?:@\[[^\]]*\]\s*)?"                      # optional attribute
     r"(?:private\s+|protected\s+|noncomputable\s+)*"
@@ -286,9 +295,13 @@ def parse_document(text: str) -> list[dict]:
 def _assoc_proofs(statements: list[dict], proofs: list[dict]) -> dict[str, set[str]]:
     """Map each statement label → the set of labels its proof ``\\uses``, folding
     each proof's ``\\leanok`` / ``\\mathlibok`` back into its statement. A proof
-    with ``\\proves{lbl}`` binds to that label; otherwise to the nearest
-    preceding statement."""
+    with ``\\proves{lbl}`` binds to that label — any of the statement's labels,
+    canonical or legacy alias, resolved to the canonical one — otherwise to the
+    nearest preceding statement."""
     by_label = {s["label"]: s for s in statements}
+    # \proves{} may name a legacy alias (a statement's 2nd+ \label); fold it
+    # to the canonical label or the proof's uses/leanok silently vanish
+    canonical = {alias: s["label"] for s in statements for alias in s["labels"]}
     proof_uses: dict[str, set[str]] = {}
     for pr in proofs:
         label = pr["proves"]
@@ -297,6 +310,8 @@ def _assoc_proofs(statements: list[dict], proofs: list[dict]) -> dict[str, set[s
             if not preceding:
                 continue
             label = max(preceding, key=lambda s: s["pos"])["label"]
+        else:
+            label = canonical.get(label, label)
         proof_uses.setdefault(label, set()).update(pr["uses"])
         if label in by_label:
             by_label[label]["leanok"] |= pr["leanok"]
@@ -400,6 +415,23 @@ def _iter_lean_files(paths) -> list[Path]:
     return files
 
 
+# below this many .lean files, spinning up a process pool costs more than it
+# saves; above it, parse_lean's regex work is worth spreading across cores.
+_PARALLEL_THRESHOLD = 8
+
+
+def _read_and_parse_lean(args: tuple[Path, Path]) -> tuple[str, list[dict]]:
+    """Read one .lean file and parse its declarations. Module-level (picklable)
+    so it can run in a subprocess — reading and regex-parsing a file are pure
+    functions of its content, safe to run in parallel across files."""
+    f, root_abs = args
+    try:
+        rel = str(f.resolve().relative_to(root_abs))
+    except ValueError:
+        rel = str(f)
+    return rel, parse_lean(f.read_text(encoding="utf-8"))
+
+
 # --------------------------------------------------------------------------- #
 # the reconcile driver
 # --------------------------------------------------------------------------- #
@@ -423,20 +455,22 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
     seen = {"blueprint": set(), "lean": set()}
     root_abs = Path(root).resolve()
 
-    def _rel(f: Path) -> str:
-        """Store the source path relative to the project root, so the value is
-        stable no matter which directory `sync` was invoked from."""
-        try:
-            return str(Path(f).resolve().relative_to(root_abs))
-        except ValueError:
-            return str(f)
-
     # 1. Lean nodes (keyed by fully-qualified name) ------------------------- #
+    # reading + regex-parsing each file is independent of every other file,
+    # so on a large Lean tree it's worth spreading across a process pool;
+    # `_upsert` (graph writes) stays sequential below.
+    lean_files = _iter_lean_files(lean_paths)
+    if len(lean_files) >= _PARALLEL_THRESHOLD:
+        with ProcessPoolExecutor() as ex:
+            parsed = list(ex.map(_read_and_parse_lean,
+                                 ((f, root_abs) for f in lean_files)))
+    else:
+        parsed = [_read_and_parse_lean((f, root_abs)) for f in lean_files]
+
     lean_id: dict[str, str] = {}
     lean_status: dict[str, str] = {}          # fqname → lean_ok | sorry
-    for f in _iter_lean_files(lean_paths):
-        rel = _rel(f)
-        for d in parse_lean(f.read_text(encoding="utf-8")):
+    for rel, decls in parsed:
+        for d in decls:
             nid = node_id("lean", d["fqname"])
             lean_id[d["fqname"]] = nid
             lean_status[d["fqname"]] = "sorry" if d["sorry"] else "lean_ok"
@@ -478,9 +512,9 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
                     gen_edges.append((src, lean_id[name], "formalizes"))
                 elif not s["mathlibok"]:                    # \mathlibok ⇒ external is expected
                     warnings.append(f"{s['label']}: \\lean{{{name}}} not found in Lean sources")
-            for ref in s["uses"]:                           # statement \uses → depends_on
+            for ref in s["uses"]:                           # statement \uses → uses
                 if ref in bp_id:
-                    gen_edges.append((src, bp_id[ref], "depends_on"))
+                    gen_edges.append((src, bp_id[ref], "uses"))
                 else:
                     warnings.append(f"{s['label']}: \\uses{{{ref}}} (statement) has no blueprint node")
             for ref in sorted(proof_uses.get(s["label"], ())):  # proof \uses → uses
@@ -490,31 +524,51 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
                     warnings.append(f"{s['label']}: \\uses{{{ref}}} (proof) has no blueprint node")
 
     # 3. reconcile generated edges: one per ordered pair, collapsed to the
-    #    strongest type, and never overwriting an authored edge on that pair.
-    pair_type: dict[tuple[str, str], str] = {}
-    for s, t, ty in gen_edges:
-        cur = pair_type.get((s, t))
-        if cur is None or _EDGE_RANK.get(ty, 0) > _EDGE_RANK.get(cur, 0):
-            pair_type[(s, t)] = ty
-    authored = {(e.source, e.target)
-                for e in g.edges() if not e.attrs.get("generated")}
-    for e in g.edges():
-        if e.attrs.get("generated"):
-            g.delete_edge(e.id)
+    #    strongest type, never overwriting an authored edge on that pair —
+    #    and never touching an edge file that is already right, so authored
+    #    fields (note:) and attachment dirs on generated edges survive, and
+    #    re-running sync is a true no-op on unchanged sources. All generated
+    #    edges derive from the blueprint, so a Lean-only sync leaves them
+    #    alone entirely (deleting them all was NOT what "partial sync" means).
     made = 0
-    for (s, t), ty in pair_type.items():
-        if (s, t) in authored:
-            warnings.append(f"edge {s}→{t}: authored edge present, kept over generated {ty}")
-            continue
-        g.add_edge(s, t, ty, generated="blueprint")
-        made += 1
+    if blueprint:
+        pair_type: dict[tuple[str, str], str] = {}
+        for s, t, ty in gen_edges:
+            cur = pair_type.get((s, t))
+            if cur is None or _EDGE_RANK.get(ty, 0) > _EDGE_RANK.get(cur, 0):
+                pair_type[(s, t)] = ty
+        authored = set()
+        existing: dict[tuple[str, str], object] = {}
+        for e in g.edges():
+            if e.attrs.get("generated"):
+                existing[(e.source, e.target)] = e
+            else:
+                authored.add((e.source, e.target))
+        for pair, e in existing.items():
+            if pair not in pair_type:            # vanished from the sources
+                g.delete_edge(e.id)
+        for (s, t), ty in pair_type.items():
+            if (s, t) in authored:
+                warnings.append(f"edge {s}→{t}: authored edge present, kept over generated {ty}")
+                continue
+            old = existing.get((s, t))
+            if old is None:
+                g.add_edge(s, t, ty, generated="blueprint")
+            elif old.type != ty:
+                # type changed — rewrite, carrying authored extras through
+                extra = {k: v for k, v in old.attrs.items() if k != "generated"}
+                g.add_edge(s, t, ty, replace=True, generated="blueprint", **extra)
+            made += 1
 
-    # 4. mark vanished generated nodes stale (never delete) ----------------- #
+    # 4. mark vanished generated nodes stale (never delete) — only within the
+    #    populations that were actually synced this run: a --lean-only sync
+    #    must not declare every blueprint node stale (and vice versa) -------- #
     stale = 0
     for n in g.nodes():
         gen = n.meta.get("generated")
-        if gen in ("blueprint", "lean") and n.id not in seen[gen] \
-                and not n.meta.get("stale"):
+        synced = (gen == "blueprint" and bool(blueprint)) or \
+                 (gen == "lean" and bool(lean_paths))
+        if synced and n.id not in seen[gen] and not n.meta.get("stale"):
             g.modify_node(n.id, set_meta={"stale": True})
             stale += 1
 

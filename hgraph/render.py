@@ -103,21 +103,30 @@ def render_get(g: Graph, nid: str) -> str:
     if anc:
         out.append(f"all ancestors ({len(anc)}): " + ", ".join(anc))
 
-    for kind in ATTACHMENT_KINDS:
-        items = g.attachments(nid, kind)
-        if items:
-            out.append(f"\n{kind}s:")
-            for c in items:
-                who = c.meta.get("author") or "anon"
-                when = c.meta.get("date", "")
-                verdict = c.meta.get("verdict")
-                title = c.meta.get("title")
-                head = f"  - [{when} · {who}]" + (f" [{verdict}]" if verdict else "")
-                head += f" {title}:" if title else ""
-                extras = [f"{k}: {c.meta[k]}" for k in ("confidence", "quality")
-                          if c.meta.get(k) is not None]
-                tail = f"  ({', '.join(extras)})" if extras else ""
-                out.append(f"{head} {c.content.strip()}{tail}")
+    comments = g.attachments(nid, "comment")
+    if comments:
+        out.append("\ncomments:")
+        for c in comments:
+            who = c.meta.get("author") or "anon"
+            when = c.meta.get("date", "")
+            title = c.meta.get("title")
+            head = f"  - [{when} · {who}]" + (f" {title}:" if title else "")
+            out.append(f"{head} {c.content.strip()}")
+
+    reviews = g.attachments(nid, "review")
+    if reviews:
+        out.append("\nreviews:")
+        for r in reviews:
+            who = r.meta.get("author") or "anon"
+            when = r.meta.get("date", "")
+            axes = []
+            if r.meta.get("maths_verdict"):
+                axes.append(f"maths: {r.meta['maths_verdict']}"
+                           + (f" — {r.meta['maths_comment']}" if r.meta.get("maths_comment") else ""))
+            if r.meta.get("lean_verdict"):
+                axes.append(f"lean: {r.meta['lean_verdict']}"
+                           + (f" — {r.meta['lean_comment']}" if r.meta.get("lean_comment") else ""))
+            out.append(f"  - [{when} · {who}]  " + "  ".join(axes))
     return "\n".join(out)
 
 
@@ -141,7 +150,7 @@ def view_text(g: Graph, kind: str) -> str:
             arrow = "→" if e.source == n.id else "←"
             out.append(f"    ~ {e.type} {arrow} {other} [{g.get_node(other).type}]")
         for e in g.successors(n.id, hard=True):
-            out.append(f"    ⇒ depends_on {e.target}")
+            out.append(f"    ⇒ {e.type} {e.target}")
     return "\n".join(out)
 
 

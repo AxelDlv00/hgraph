@@ -383,6 +383,7 @@ a {
   font-size: 12.5px;
   color: var(--muted);
   margin-bottom: 10px;
+  overflow-wrap: anywhere; /* long Mathlib decl names wrap instead of overflowing */
 }
 
 .stmt-lean {
@@ -399,9 +400,14 @@ a {
 .lean-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap; /* a long fq-name pushes the badge to the next line, not out of the panel */
   gap: 8px;
   margin-bottom: 6px;
   font-size: 13px;
+}
+.lean-head code {
+  min-width: 0;
+  word-break: break-all; /* Foo.figureEightCurve_closed_range_eq_restricted_range must wrap */
 }
 .lean-code {
   margin: 0;
@@ -588,10 +594,12 @@ a {
   background: var(--panel);
   overflow-y: auto;
   overflow-x: hidden;
+  overflow-wrap: break-word; /* long titles/labels wrap rather than clip */
   display: flex;
   flex-direction: column;
   padding: 16px;
 }
+#gm-side .dep-chip { max-width: 100%; overflow-wrap: anywhere; }
 #gm-side.empty { width: 0; border-left: none; padding: 0; }
 #gm-side.empty .gp-close { display: none; }
 @media (max-width: 860px) {
@@ -964,7 +972,10 @@ pre.lean { background: #f8f9fb; border: 1px solid var(--line); border-radius: 8p
 .gm-count { right: 14px; top: 14px; padding: 6px 11px; color: var(--muted); pointer-events: none; z-index: 3; }
 .gm-count b { color: var(--heading); }
 .gm-hint { right: 14px; bottom: 14px; padding: 7px 11px; color: var(--muted); pointer-events: none; font-size: 12px; z-index: 3; max-width: 60%; }
-.gm-gvload { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; background: var(--bg); }
+/* translucent + click-through: the previous graph stays visible (and pannable)
+   while the worker lays the next one out, so a layout never reads as a freeze */
+.gm-gvload { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--heading); font-size: 13px; background: color-mix(in srgb, var(--bg) 55%, transparent); pointer-events: none; }
+.gm-gvload > div { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 8px 14px; box-shadow: var(--shadow); }
 
 /* ==== summary + bibliography views ==== */
 .sumgrid { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 24px; }

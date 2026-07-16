@@ -20,8 +20,36 @@ If $a$ and $b$ are even then $a + b$ is even.
 
 - `\label{…}` — the item's **identity**. Blueprint nodes are keyed on it.
 - `\lean{…}` — the Lean declaration(s) it corresponds to → a `formalizes` edge.
-- `\uses{…}` — dependencies (labels). In a **statement** → `depends_on`; inside a
-  `\begin{proof}` → `uses`.
+- `\uses{…}` — dependencies (labels), in a **statement** or inside a
+  `\begin{proof}` alike → a `uses` edge (the one hard edge type).
+
+## Chapters and bibliography
+
+The blueprint is a `report`, split by `\chapter` into **Parity** (the parity
+groundwork) and **The summation formula** (the Mathlib-backed splitting lemma
+and the theorem). Only `\chapter` starts a chapter; `\section` and below stay
+inside one as ordinary headings. Chapters are not decoration — they drive:
+
+- the document view's chapter-by-chapter reading order and its outline;
+- each statement's `chapter` field (`hgraph get label:thm:gauss`), which the
+  graph also falls back on when grouping nodes that have no dependencies;
+- **chapter-scoped numbering** — `Def 1.1`, `Lem 1.3`, then `Thm 2.2`;
+- the Summary tab's per-chapter coverage table (Parity 67%, summation 50%).
+
+`blueprint/refs.bib` is picked up because it sits under the blueprint's
+directory — any `.bib` there is parsed, deduped by key. A `\cite{…}` in a
+statement body renders as a link into the **Bibliography** tab, which lists each
+entry with the statements citing it:
+
+| entry | cited from |
+|---|---|
+| Sartorius von Waltershausen (1856), the schoolboy anecdote | `thm:gauss` |
+| Graham, Knuth & Patashnik, *Concrete Mathematics* | `lem:mul-succ`, `thm:gauss` |
+| The mathlib Community (2020) | `lem:sum-succ` |
+
+The *Concrete Mathematics* entry is the same source the theorem records
+structurally in its `origin` / `origin_details` (step 2 of the build) — the
+citation is the prose-level link, the `origin` is the machine-readable one.
 
 `Lean/Basic.lean` + `Lean/Gauss.lean` hold the declarations. Each becomes a Lean
 node keyed on its **fully-qualified name** (`Gauss.isEven_add`), carrying its
@@ -62,12 +90,13 @@ express:
 - structured `origin` + `origin_details` on the theorem (provenance);
 - authored `status` (`draft` / `verified` / `failed`) and `tags` on several nodes;
 - a source-quote node (`--author human`, `--key even-quote`) + an associative
-  `quote` edge;
+  `related_to` edge;
 - two **comments** (a debugging progression, each with a `--title`) on the still-
   `sorry` lemma, stored as attachments under `nodes/<id>/comment-N.md`;
-- two **reviews** carrying a `--verdict` (`good` / `bad`), a `--quality` rating,
-  a `--title` and `--confidence` — one on the lemma (`bad`, unfinished proof),
-  one on the theorem (`good`).
+- two **reviews**, each a Maths good/bad + comment and/or a Lean good/bad +
+  comment (`--maths`/`--maths-comment`, `--lean`/`--lean-comment`) — one on
+  the lemma (maths good, lean bad: unfinished proof), one on the theorem
+  (maths good only).
 
 Every node also carries auto `author` / `created` / `updated`. Step 3 runs `sync`
 **again**: bodies are re-derived, but all of the above survives untouched, and
@@ -94,13 +123,14 @@ mathlib_ok` and `mathlib_name: [Finset.sum_range_succ]`, with no local Lean node
 ## Edge classes
 
 Edge files are named `<src>__<tgt>.md` (one per ordered pair); the type is in
-the YAML. When a statement and a proof both `\uses` the same target, the two
-collapse to the stronger `depends_on`.
+the YAML. Only three types exist: a statement's and a proof's `\uses` both
+generate the same hard `uses` edge (deduped to one per pair), so there's no
+separate "statement vs proof dependency" to track.
 
-| class | types here | source | merges in union view? |
-|-------|-----------|--------|:---:|
-| hard | `depends_on` (statement `\uses`), `uses` (proof `\uses`) | generated | no |
+| class | type | source | merges in union view? |
+|-------|------|--------|:---:|
+| hard | `uses` (statement/proof `\uses`) | generated | no |
 | identity (soft) | `formalizes` (`\lean`) | generated | **yes** |
-| associative (soft) | `quote` | authored | no |
+| associative (soft) | `related_to` | authored | no |
 
 (Comments aren't edges — they're attachments under `nodes/<id>/`.)

@@ -14,9 +14,9 @@ Storage is deliberately boring and human-first:
 * An **edge** is its own small file named ``<source>__<target>.md`` — one per
   ordered pair. Its YAML header carries ``type`` and whether it is *hard* or
   *soft*:
-    - **hard** = a dependency (``depends_on``) — the DAG you schedule on;
-    - **soft** = a semantic link (``formalizes``, ``informal_of``, ``quote``, …) —
-      relates different representations/notes of the same object, not a dependency.
+    - **hard** = a dependency (``uses``) — the DAG you schedule on;
+    - **soft** = a semantic link (``formalizes``, ``related_to``) — relates
+      different representations/notes of the same object, not a dependency.
 * **Comments** (reviews, "tried simp, failed because …") are *attachments*: small
   files under the owner node's sibling directory (``nodes/<id>/comment-N.md``) —
   failure memory that lives with the node, not extra nodes in the graph.
@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
+import threading
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -43,12 +44,21 @@ from typing import Iterable, Iterator, Optional
 
 import yaml
 
-# edge types that mean "A depends on B" (everything else is a soft/semantic link)
-HARD_TYPES = {"depends_on", "uses", "requires", "needs", "imports"}
-# soft links that assert two nodes are the SAME conceptual object in different
-# forms (1 informal ↔ many formal). ONLY these merge nodes in the union view.
-IDENTITY_TYPES = {"formalizes", "formalization_of", "informal_of", "same_as",
-                  "restates", "variant_of"}
+# the C loader parses the same YAML ~10x faster than the pure-Python one, and
+# header parsing dominates every whole-graph read; fall back transparently
+# where libyaml isn't compiled in
+try:
+    from yaml import CSafeLoader as _YamlLoader
+except ImportError:                                   # pragma: no cover
+    from yaml import SafeLoader as _YamlLoader
+
+# the one edge type that means "A depends on B" (everything else is a soft/
+# semantic link). Both a statement's and a proof's `\uses` become this.
+HARD_TYPES = {"uses"}
+# the one soft link that asserts two nodes are the SAME conceptual object in
+# different forms (1 informal ↔ many formal) — the only kind sync generates.
+# ONLY this merges nodes in the union view; other soft links use `related_to`.
+IDENTITY_TYPES = {"formalizes"}
 # per-node notes ("tried simp, failed …", a review) are ATTACHMENTS — files under
 # the node's sibling dir, not edges. Each kind is stored as `<kind>-N.md`.
 ATTACHMENT_KINDS = ("comment", "review")
@@ -88,7 +98,7 @@ def _read_doc(path: Path) -> tuple[dict, str]:
     if text.startswith("---\n"):
         end = text.find("\n---\n", 4)
         if end != -1:
-            meta = yaml.safe_load(text[4:end]) or {}
+            meta = yaml.load(text[4:end], Loader=_YamlLoader) or {}
             return meta, text[end + 5:]
     return {}, text
 
@@ -300,8 +310,14 @@ class Graph:
             raise HGraphError(f"no such edge '{eid}'")
         m, _ = _read_doc(p)
         m = dict(m)
-        return Edge(id=eid, source=m.pop("source"), target=m.pop("target"),
-                    type=m.pop("type"), hard=bool(m.pop("hard", False)), attrs=m)
+        try:
+            source, target, type_ = m.pop("source"), m.pop("target"), m.pop("type")
+        except KeyError as e:
+            # a hand-edited file missing a required header key shouldn't take
+            # down every whole-graph operation with a bare KeyError
+            raise HGraphError(f"edge file '{eid}.md' is missing {e} in its header")
+        return Edge(id=eid, source=source, target=target,
+                    type=type_, hard=bool(m.pop("hard", False)), attrs=m)
 
     def delete_edge(self, eid: str) -> None:
         p = self._edge_path(eid)
@@ -341,6 +357,11 @@ class Graph:
             return []
         return sorted(d.glob(f"{kind}-*.md"), key=self._attach_num)
 
+    # `hgraph serve` writes attachments from ThreadingHTTPServer threads; the
+    # read-max-then-write numbering below must be atomic or two concurrent
+    # POSTs to the same node pick the same N and one silently vanishes
+    _attach_lock = threading.Lock()
+
     def add_attachment(self, target: str, kind: str, content: str, *,
                        author: Optional[str] = None, **meta) -> str:
         """Attach a note of ``kind`` (``comment`` / ``review``) to a node: a file
@@ -348,15 +369,16 @@ class Graph:
         (``title``, ``confidence``, …) is stored in the header."""
         if not self.has_node(target):
             raise HGraphError(f"no such node '{target}'")
-        existing = self._attach_files(target, kind)
-        n = (self._attach_num(existing[-1]) + 1) if existing else 1
         m = {}
         if author is not None:
             m["author"] = author
         m.update({k: v for k, v in meta.items() if v is not None})
         now = _now()
         m["created"] = m["updated"] = m["date"] = now   # date kept for back-compat
-        _write_doc(self._node_dir(target) / f"{kind}-{n}.md", m, content)
+        with self._attach_lock:
+            existing = self._attach_files(target, kind)
+            n = (self._attach_num(existing[-1]) + 1) if existing else 1
+            _write_doc(self._node_dir(target) / f"{kind}-{n}.md", m, content)
         return f"{target}/{kind}-{n}"
 
     def attachments(self, nid: str, kind: str) -> list[Node]:
@@ -392,12 +414,19 @@ class Graph:
         return self.edges(target=nid, type=type, hard=hard)
 
     def _reach(self, start: str, *, forward: bool, hard: Optional[bool]) -> list[str]:
+        # one edges() pass up front: calling self.edges() per visited node
+        # re-reads and YAML-parses every edge file each time — O(V·E) disk
+        # reads, seconds on a thousand-statement blueprint
+        adj: dict[str, list[str]] = {}
+        for e in self.edges(hard=hard):
+            if forward:
+                adj.setdefault(e.source, []).append(e.target)
+            else:
+                adj.setdefault(e.target, []).append(e.source)
         seen, order, stack = {start}, [], [start]
         while stack:
             cur = stack.pop()
-            nxts = ([e.target for e in self.edges(source=cur, hard=hard)] if forward
-                    else [e.source for e in self.edges(target=cur, hard=hard)])
-            for nxt in nxts:
+            for nxt in adj.get(cur, ()):
                 if nxt not in seen:
                     seen.add(nxt)
                     order.append(nxt)
@@ -406,7 +435,7 @@ class Graph:
 
     def ancestors(self, nid: str) -> list[str]:
         """Everything ``nid`` transitively depends on (follows hard edges out).
-        Convention: ``a --depends_on--> b`` ⇒ b is an ancestor of a."""
+        Convention: ``a --uses--> b`` ⇒ b is an ancestor of a."""
         return self._reach(nid, forward=True, hard=True)
 
     def descendants(self, nid: str) -> list[str]:
@@ -415,10 +444,10 @@ class Graph:
 
     # ---- the union / soft-cluster view ------------------------------------ #
     def soft_components(self) -> list[set[str]]:
-        """Connected components under *identity* links (``formalizes``,
-        ``informal_of``, ``same_as``, …) — each is one conceptual object that may
-        bundle a tex statement with several Lean formalizations. Dependencies,
-        quotes, and comments do NOT merge nodes (they relate distinct objects)."""
+        """Connected components under *identity* links (``formalizes``) — each
+        is one conceptual object that may bundle a tex statement with several
+        Lean formalizations. Dependencies, ``related_to`` links, and comments
+        do NOT merge nodes (they relate distinct objects)."""
         parent: dict[str, str] = {n.id: n.id for n in self.nodes()}
 
         def find(x: str) -> str:

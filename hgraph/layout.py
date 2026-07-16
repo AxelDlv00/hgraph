@@ -1,20 +1,20 @@
 """Build-time Graphviz layout.
 
-The dashboard's full dependency graph is otherwise laid out **in the browser** by
-Graphviz-compiled-to-WASM (``d3-graphviz``) every time the modal opens — on a
-large blueprint (~1850 statements) that is a multi-second stall, and it needs a
-CDN fetch. This module builds the *same* DOT the JS builds (``gmDot`` /
-``gmDotGroups`` in ``dashboard.py``), runs the system ``dot`` once at build time,
-and returns positioned SVG. The page then embeds that SVG and skips the WASM
-layout entirely.
+The graph modal's collapsed chapter overview is otherwise laid out **in the
+browser** by Graphviz-compiled-to-WASM (``@viz-js/viz``, in a Web Worker) the
+first time the modal opens. This module builds the same overview DOT the JS
+builds (``dotMixed`` with nothing expanded, in ``frontend/src/graphDot.ts``),
+runs the system ``dot`` once at build time, and returns positioned SVG. The
+page embeds that SVG for an instant first paint and skips the WASM layout.
 
 It is a **pure optimisation**: if ``dot`` isn't on ``PATH`` (or fails), this
-returns ``{}`` and the dashboard falls back to the existing client-side WASM path
-(and, offline, to the canvas layout). Nothing here is required at runtime.
+returns ``{}`` and the modal lays the overview out live with the bundled WASM
+engine instead. Nothing here is required at runtime.
 
 INVARIANT: the styling here (border = statement status, fill = proof status,
-rect = definition / ellipse = theorem) must stay in lockstep with ``gmStatuses`` /
-``gmStyle`` / ``gmDot`` in ``dashboard.py``. Both sides are small; keep them mirrored.
+rect = definition / ellipse = theorem, the purple chapter boxes) must stay in
+lockstep with ``frontend/src/graphDot.ts`` + ``frontend/src/palette.ts``.
+Both sides are small; keep them mirrored.
 """
 
 from __future__ import annotations
@@ -24,11 +24,18 @@ import re
 import shutil
 import subprocess
 
-# --- style maps: identical to GBORDER / GFILL in dashboard.py -----------------
+# --- style maps: mirror of GRAPH in frontend/src/palette.ts, which is the
+# source of truth for the web UI's graph. Keep the two in lockstep. ------------
 _DEF_KINDS = {"definition", "example", "remark", "notation", "convention"}
 _GBORDER = {"formalized": "#2e7d32", "ready": "#1565c0", "blocked": "#b0bec5"}
 _GFILL = {"done": "#66bb6a", "local": "#c8e6c9", "incomplete": "#ffcc80",
           "ready": "#bbdefb", "notready": "#eef1f4"}
+_CLUSTER = {"fill": "#ede9fe", "border": "#7c3aed", "text": "#3b0a91"}
+# a semantic-group cluster is neutral: the green ramp on its box carries the
+# progress signal, so the frame stays out of the way
+_GROUP_CLUSTER = {"fill": "#f4f5f9", "border": "#c9cfda", "text": "#5b6470"}
+_NODE_TEXT = "#1c2024"
+_EDGE = "#8a93a0"
 _DONE = {"lean_ok", "mathlib_ok"}
 
 
@@ -71,9 +78,10 @@ def _dot_label(title: str) -> str:
 
 
 def _gv_green(pct: int) -> str:
-    """Progress colour ramp — mirror of the JS ``gvGreen``."""
+    """Progress colour ramp, a near-white green -> _GFILL["done"] — mirror of
+    the JS ``gvGreen``."""
     t = max(0.0, min(1.0, pct / 100))
-    ramp = ((0xec, 0x66), (0xf3, 0xbb), (0xec, 0x6a))
+    ramp = ((0xEC, 0x66), (0xF3, 0xBB), (0xEC, 0x6A))
     return "#" + "".join("%02x" % round(a + (b - a) * t) for a, b in ramp)
 
 
@@ -100,7 +108,7 @@ class _Model:
                 if t is None or t == s or (s, t) in seen:
                     continue
                 seen.add((s, t))
-                self.edges.append((s, t, d.get("type") or "depends_on"))
+                self.edges.append((s, t, d.get("type") or "uses"))
 
         # compact chapter index, in first-appearance order
         def key_of(e):
@@ -220,10 +228,16 @@ class _Model:
         return [bool(x) for x in memo]
 
     def ch_label(self, compact: int) -> str:
+        """"Chapter 3 · Curvature" — mirror of the JS ``chLabel``. The two must
+        agree: the all-collapsed graph is this precomputed SVG, and expanding
+        anything swaps in a client-rendered one, so a label that differed would
+        visibly change under the reader."""
         k = self.order[compact]
         if isinstance(k, int) and 0 <= k < len(self._chapters):
             c = self._chapters[k]
-            return ((c.get("num") or "") + " " + _plain_tex(c.get("title"))).strip()
+            title = _plain_tex(c.get("title"))
+            num = c.get("num")
+            return ("Chapter %s · %s" % (num, title)) if num else title
         return _plain_tex(str(k))[:30]
 
     def grp_label(self, g: int) -> str:
@@ -240,14 +254,14 @@ class _Model:
     def _node_line(self, i: int) -> str:
         e = self.entries[i]
         is_def = (e.get("kind") in _DEF_KINDS)
-        fill = _GFILL.get(self.proof[i], "#eef1f4")
-        border = _GBORDER.get(self.stmt[i], "#b0bec5")
+        fill = _GFILL.get(self.proof[i], _GFILL["notready"])
+        border = _GBORDER.get(self.stmt[i], _GBORDER["blocked"])
         shape = "box" if is_def else "ellipse"
         style = '"rounded,filled"' if is_def else '"filled"'
         label = _dot_label(e.get("title") or e.get("label") or e["id"])
         return ('"%s" [shape=%s,style=%s,fillcolor="%s",color="%s",'
-                'fontcolor="#1c2024",label="%s"];'
-                % (self.ids[i], shape, style, fill, border, label))
+                'fontcolor="%s",label="%s"];'
+                % (self.ids[i], shape, style, fill, border, _NODE_TEXT, label))
 
 
 def _dot_clustered(m: _Model, unit_of, n_units: int, label_fn) -> str:
@@ -259,12 +273,14 @@ def _dot_clustered(m: _Model, unit_of, n_units: int, label_fn) -> str:
     out = ['strict digraph "" {',
            '  rankdir=TB;bgcolor="transparent";pack=true;packmode="clust";splines=true;nodesep=0.3;ranksep=0.5;',
            '  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=11,margin="0.11,0.05",penwidth=1.8];',
-           '  edge [color="#8a93a0",arrowhead=vee,arrowsize=0.7,penwidth=1];',
+           '  edge [color="' + _EDGE + '",arrowhead=vee,arrowsize=0.7,penwidth=1];',
            '  graph [fontname="Helvetica",fontsize=13,labeljust="l"];']
     for u in sorted(by_u):
         out.append('  subgraph cluster_%d {' % u)
-        out.append('    label="%s";style="rounded,filled";fillcolor="#f4f5f9";'
-                   'color="#c9cfda";penwidth=1.4;fontcolor="#5b6470";' % _gv_esc(label_fn(u)))
+        out.append('    label="%s";style="rounded,filled";fillcolor="%s";'
+                   'color="%s";penwidth=1.4;fontcolor="%s";'
+                   % (_gv_esc(label_fn(u)), _GROUP_CLUSTER["fill"],
+                      _GROUP_CLUSTER["border"], _GROUP_CLUSTER["text"]))
         for i in by_u[u]:
             out.append('    ' + m._node_line(i))
         out.append('  }')
@@ -293,20 +309,27 @@ def _dot_overview(m: _Model, unit_of, n_units: int, label_fn, id_prefix: str) ->
     out = ['strict digraph "" {',
            '  rankdir=TB;bgcolor="transparent";splines=true;nodesep=0.45;ranksep=0.65;',
            '  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=12,margin="0.2,0.13",penwidth=1.8];',
-           '  edge [color="#8a93a0",arrowhead=vee,arrowsize=0.85,penwidth=1.2];',
+           '  edge [color="' + _EDGE + '",arrowhead=vee,arrowsize=0.85,penwidth=1.2];',
            '  graph [fontname="Helvetica"];']
     for u in range(n_units):
         if not count[u]:
             continue
-        pct = round(100 * done[u] / count[u])
+        # half-up, like JS Math.round — Python's round() is half-to-even, and
+        # an exact-.5 percentage must not differ between this precomputed SVG
+        # and the client's live re-render (graphDot.ts dotMixed)
+        pct = int(100 * done[u] / count[u] + 0.5)
         lbl = _gv_esc(label_fn(u))
         # purple = "this is a chapter" (matches the client's expand-in-place
         # coloring exactly, so the instant precomputed first paint and any
-        # later live re-render after expanding look like the same design)
-        fill, border = ("#ede9fe", "#7c3aed") if id_prefix == "ch" else (_gv_green(pct), "#5e8777")
+        # later live re-render after expanding look like the same design);
+        # a semantic group instead ramps green by how much of it is done.
+        is_ch = id_prefix == "ch"
+        fill, border = ((_CLUSTER["fill"], _CLUSTER["border"]) if is_ch
+                        else (_gv_green(pct), "#5e8777"))
         out.append('  "%s%d" [label="%s\\n%d statements · %d%%",fillcolor="%s",'
-                   'color="%s",penwidth=2.6,fontcolor="#3b0a91",tooltip="%s — click to expand"];'
-                   % (id_prefix, u, lbl, count[u], pct, fill, border, lbl))
+                   'color="%s",penwidth=2.6,fontcolor="%s",tooltip="%s — click to expand"];'
+                   % (id_prefix, u, lbl, count[u], pct, fill, border,
+                      _CLUSTER["text"] if is_ch else _NODE_TEXT, lbl))
     for (b, a), w in em.items():
         extra = (' [penwidth=%.1f]' % min(4.0, 1 + math.sqrt(w))) if w > 1 else ''
         out.append('  "%s%d" -> "%s%d"%s;' % (id_prefix, b, id_prefix, a, extra))
@@ -346,20 +369,22 @@ def _run_dot(dot: str) -> str | None:
 
 
 def render_svgs(data: dict | None) -> dict:
-    """Return the precomputed positioned SVG for the collapsed chapter overview
-    (``groups``) — the one state the dashboard opens on, laid out by ``dot`` at
-    build time so it needs no CDN/WASM. Returns ``{}`` when ``dot`` is unavailable
-    (⇒ the dashboard uses the client fallback).
-
-    Only ``groups`` is embedded: the old ``full`` layout of every statement
-    (~11800×8500 pt on a large blueprint, several MB) and the group-axis variants
-    were dead weight — nothing on the client read them. Expanded states lay out on
-    the client (cached), which keeps the page small and the initial load fast."""
+    """Return the precomputed positioned SVG, laid out by ``dot`` at build
+    time: ``groups``, the collapsed chapter overview the graph modal opens on
+    — an instant first paint with no WASM layout. (A ``full`` per-node SVG
+    used to be emitted too, but no frontend code ever read it: it was a
+    wasted ``dot`` run and, at hundreds of statements, several hundred KB of
+    dead payload in every data.json.) Returns ``{}`` when ``dot`` is
+    unavailable — the client then lays the same overview out live with its
+    bundled WASM Graphviz."""
     if not data or not data.get("entries") or not dot_available():
         return {}
     try:
         m = _Model(data)
     except Exception:
         return {}
+    out = {}
     groups = _run_dot(_dot_groups(m))
-    return {"groups": groups} if groups else {}
+    if groups:
+        out["groups"] = groups
+    return out

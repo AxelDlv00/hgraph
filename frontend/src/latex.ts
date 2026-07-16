@@ -178,14 +178,18 @@ export function detex(
   refs: Record<string, RefEntry> = {},
   cites: CiteNums = {},
 ): string {
-  s = esc(mathEnvs(String(s || '')));
+  // `\$` is a literal dollar, not a math delimiter — pull it out before the
+  // math-protection regexes below (and mathEnvs') can mistake it for one,
+  // and restore it as an entity so KaTeX's auto-render won't re-read it
+  s = String(s || '').replace(/\\\$/g, '@@KDOLLARK@@');
+  s = esc(mathEnvs(s));
   const math: string[] = [];
   s = s.replace(/(\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$\$[\s\S]*?\$\$|\$[^$]*?\$)/g, (m) => {
     math.push(m);
     return '@@KX' + (math.length - 1) + 'XK@@';
   });
   s = detexRest(inlineMacros(s, refs, cites));
-  return s.replace(/@@KX(\d+)XK@@/g, (_m, i) => math[+i]);
+  return s.replace(/@@KX(\d+)XK@@/g, (_m, i) => math[+i]).replace(/@@KDOLLARK@@/g, '&#36;');
 }
 
 export function proseHtml(

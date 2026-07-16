@@ -236,28 +236,25 @@ export function GraphModal({
     prefetchLayouts(dots);
   }, [model, lvlMax, data.gvsvg]);
 
-  // fit the fresh layout to the canvas before paint (no flicker)
-  useLayoutEffect(() => {
-    fitToView();
-  }, [svg]);
-
-  // --- tag the rendered SVG --------------------------------------------------
+  // --- inject + tag the rendered SVG imperatively ---------------------------
+  // The SVG is deliberately NOT rendered through dangerouslySetInnerHTML:
+  // React 19 re-sets such content on ANY re-render of the element — even
+  // when `__html` is the very same string — so every node click / filter
+  // keystroke would re-parse a potentially hundreds-of-KB SVG and wipe the
+  // tags below. Injecting into a childless <div> React never writes children
+  // to makes re-renders free; injection happens exactly once per layout.
+  //
   // data-nid / data-ch / data-edge drive the delegated click handler below,
   // the filter-dimming pass, and HoverPreview's `.node[data-nid]` hover
   // preview; the <title> elements they're read from are removed so the
   // browser doesn't add its own tooltips.
-  //
-  // No dependency array: React 19 re-sets `dangerouslySetInnerHTML` content
-  // on ANY re-render of the element — even when `__html` is the very same
-  // string — replacing the tagged <svg> with a raw one (verified against the
-  // built bundle; the pre-rewrite code carried the same warning). The marker
-  // guard below makes the re-run O(1) unless the DOM really was reset; and
-  // since pan/zoom/drag write transforms through refs without re-rendering,
-  // commits only happen on real state changes (clicks, filter edits) anyway.
   useLayoutEffect(() => {
-    const svgEl = wrapRef.current?.querySelector('svg');
-    if (!svgEl || svgEl.dataset.wired) return;
-    svgEl.dataset.wired = '1';
+    const host = innerRef.current as (HTMLDivElement & { __hgSvg?: string }) | null;
+    if (!host || svg == null || host.__hgSvg === svg) return;
+    host.innerHTML = svg;
+    host.__hgSvg = svg;
+    const svgEl = host.querySelector('svg');
+    if (!svgEl) return;
     svgEl.querySelectorAll('g.node').forEach((g) => {
       const el = g as SVGGElement;
       const t = el.querySelector('title');
@@ -280,7 +277,8 @@ export function GraphModal({
         t.remove();
       }
     });
-  });
+    fitToView(); // after injection, so it measures the new layout
+  }, [svg]);
 
   // one delegated listener instead of one per node — re-renders never re-wire
   function onCanvasClick(e: React.MouseEvent) {
@@ -315,10 +313,9 @@ export function GraphModal({
   }
 
   // --- status/search filter: dim non-matching nodes+edges, never hide (level
-  // filtering already happened by regenerating the DOT above). No dependency
-  // array for the same innerHTML-reset reason as the tagging pass above — a
-  // reset wipes the inline opacities too, so re-apply after every commit
-  // (it also reads the data-nid attributes that pass just (re-)wrote). ------
+  // filtering already happened by regenerating the DOT above). The SVG is
+  // injected imperatively above, so React never resets these inline styles —
+  // re-run only when the layout or the filters actually change. -------------
   useEffect(() => {
     const svgEl = wrapRef.current?.querySelector('svg');
     if (!svgEl) return;
@@ -342,7 +339,7 @@ export function GraphModal({
       const bp = passByNid.has(parts[1]) ? passByNid.get(parts[1]) : true;
       el.style.opacity = active && (!ap || !bp) ? '0.06' : '1';
     });
-  });
+  }, [svg, query, statusFilter, model]);
 
   // --- Escape: clear selection first, then close ----------------------------
   useEffect(() => {
@@ -455,7 +452,9 @@ export function GraphModal({
               onPointerCancel={endDrag}
               onClick={onCanvasClick}
             >
-              <div ref={innerRef} className="gv-inner" dangerouslySetInnerHTML={{ __html: svg }} />
+              {/* childless on purpose — the SVG is injected imperatively (see
+                  the injection effect above), so re-renders never touch it */}
+              <div ref={innerRef} className="gv-inner" />
             </div>
           ) : (
             <div className="ro" style={{ margin: 16 }}>
@@ -488,6 +487,7 @@ export function GraphModal({
                 ✕
               </button>
               <StatementCard
+                key={selectedEntry.id} /* reset review list + draft form per entry */
                 entry={selectedEntry}
                 usedBy={usedByMap.get(selectedEntry.id) || []}
                 byId={byId}

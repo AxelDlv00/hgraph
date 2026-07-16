@@ -1,0 +1,53 @@
+name: Deploy examples to GitHub Pages
+
+# Builds both examples (examples/gauss, examples/triangular) and the
+# workspace landing page (./config.yaml -> `hgraph site`) into one site,
+# then publishes it to the `gh-pages` branch — the same branch this repo's
+# Pages settings already serve from (Settings > Pages > Deploy from a
+# branch: gh-pages), so no repo settings changes are needed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "hgraph/**"
+      - "examples/**"
+      - "config.yaml"
+      - "overview.md"
+      - "pyproject.toml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install hgraph
+        run: pip install -e .
+
+      - name: Build examples/gauss
+        run: bash examples/gauss/build.sh
+
+      - name: Build examples/triangular
+        run: bash examples/triangular/build.sh
+
+      # One command writes the whole deployable tree: the landing page, the
+      # frontend bundle, and a data.json per project in the manifest — see
+      # hgraph.site.write_static_site. Nothing to assemble by hand.
+      - name: Build the combined site
+        run: hgraph site --out _site/index.html
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site

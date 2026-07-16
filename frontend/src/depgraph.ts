@@ -72,7 +72,11 @@ export function localDepGraph(e: Entry, allUps: Entry[], allDowns: Entry[], hint
     cx = W / 2;
   const H = pad * 2 + rowH * 3;
   const yOf = (i: number) => pad + rowH * i + rowH / 2;
-  const pos = new Map<Entry, { x: number; y: number }>();
+  // keyed by row+id, not by Entry: with a mutual (cyclic) dependency the same
+  // entry sits in both the "uses" and "used by" rows, and an Entry-keyed map
+  // would overwrite the up-row position with the down-row one, drawing the
+  // "uses" arrow from the wrong row
+  const pos = new Map<string, { x: number; y: number }>();
   let boxes = '',
     lines = '';
   rows.forEach(([, list], i) => {
@@ -80,7 +84,7 @@ export function localDepGraph(e: Entry, allUps: Entry[], allDowns: Entry[], hint
     list.forEach((nd, j) => {
       const x = 80 + ((W - 92) / (n + 1)) * (j + 1);
       const y = yOf(i);
-      pos.set(nd, { x, y });
+      pos.set(i + ':' + nd.id, { x, y });
       const me = i === 1;
       const tl = lab.get(nd)!;
       const st = entryStyle(nd),
@@ -99,11 +103,11 @@ export function localDepGraph(e: Entry, allUps: Entry[], allDowns: Entry[], hint
     return `<path d="M${x1} ${y1} C${x1} ${my.toFixed(1)} ${x2} ${my.toFixed(1)} ${x2} ${y2}" fill="none" stroke="#c1c6d0" stroke-width="1.4" marker-end="url(#ah)"/>`;
   };
   u.forEach((nd) => {
-    const p = pos.get(nd)!;
+    const p = pos.get('0:' + nd.id)!;
     lines += curve(p.x, p.y + BH / 2, cx, yOf(1) - BH / 2);
   });
   dn.forEach((nd) => {
-    const p = pos.get(nd)!;
+    const p = pos.get('2:' + nd.id)!;
     lines += curve(cx, yOf(1) + BH / 2, p.x, p.y - BH / 2);
   });
   const rlab = rows.map(([label], i) => (label ? `<text x="8" y="${yOf(i) + 4}" fill="#6b7280" font-size="10">${label}</text>` : '')).join('');

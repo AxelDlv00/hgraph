@@ -1,37 +1,68 @@
-\documentclass{article}
+\documentclass{report}
 % A leanblueprint-style source: each item carries a \label (its identity),
 % \lean{...} linking it to its Lean declaration(s), \uses{...} dependencies,
 % and \leanok once the Lean side checks. `hgraph sync` parses exactly these
 % macros to build the graph — the blueprint is the reference, not a foil.
+%
+% `report` (not `article`) so \chapter exists: each \chapter starts a chapter in
+% the document view, and every statement records the one it sits in. Headings
+% below it (\section and friends) stay inside the chapter as ordinary blocks.
+% `\cite{...}` resolves against blueprint/refs.bib.
 \usepackage{leanblueprint}
 \begin{document}
 
-\section{Gauss summation}
+\chapter{Parity}
+
+The theorem below is proved by induction, and its induction step leans on one
+arithmetic fact: a product of consecutive integers is even. This chapter sets up
+just enough parity to state and use it.
 
 \begin{definition}[Even]\label{def:even}\lean{Gauss.IsEven}\leanok
 A natural number $n$ is \emph{even} if $n = 2k$ for some $k$.
 \end{definition}
 
 \begin{lemma}[Sum of evens]\label{lem:even-add}\lean{Gauss.isEven_add}\uses{def:even}\leanok
-If $a$ and $b$ are even then $a + b$ is even.
+If $a$ and $b$ are even then $a + b$ is even. Unfolding \cref{def:even} on both
+sides gives $a = 2j$ and $b = 2k$, so $a + b = 2(j + k)$.
 \end{lemma}
 
 \begin{lemma}[Product with successor]\label{lem:mul-succ}\lean{Gauss.isEven_mul_succ}\uses{def:even}
-For every $n$, the product $n(n+1)$ is even.
+For every $n$, the product $n(n+1)$ is even: of two consecutive integers, one
+is always even \cite{gkp1994concrete}. Note this is strictly weaker than
+\cref{lem:even-add}, which needs \emph{both} summands even.
 \end{lemma}
+
+\chapter{The summation formula}
+
+Gauss is said to have summed the integers from $1$ to $100$ as a schoolboy by
+pairing off the ends, to his schoolmaster's surprise; the story reaches us
+through Sartorius von Waltershausen's memoir \cite{waltershausen1856gauss}. The
+proof below takes the other route, by induction.
+
+\section{Splitting off the last term}
 
 % This one is already in Mathlib — \mathlibok + a \lean pointing straight at the
 % library declaration, so it needs no local formalization.
 \begin{lemma}[Sum splits off the last term]\label{lem:sum-succ}\lean{Finset.sum_range_succ}\mathlibok
 For every $n$, $\sum_{i=0}^{n+1} i = \bigl(\sum_{i=0}^{n} i\bigr) + (n+1)$.
+This step needs no local formalization: it is already in Mathlib
+\cite{mathlib2020}, and it is the only ingredient of \cref{thm:gauss} that is
+not about parity.
 \end{lemma}
 
+\section{The theorem}
+
 \begin{theorem}[Gauss]\label{thm:gauss}\lean{Gauss.sum_range_id}
-$2\sum_{i=0}^{n} i = n(n+1)$.
+$2\sum_{i=0}^{n} i = n(n+1)$ — the division-free form of the schoolboy sum
+\cite{waltershausen1856gauss, gkp1994concrete}. Stating it as $2\sum$ rather
+than $\sum = n(n+1)/2$ keeps it in $\mathbb{N}$, and \cref{lem:mul-succ} is
+exactly what licenses the division when one wants the halved form.
 \end{theorem}
 \begin{proof}\uses{lem:sum-succ, lem:mul-succ, lem:even-add}
-By induction on $n$, splitting off the last term with the sum-splitting lemma;
-evenness of $n(n+1)$ records the divisibility along the way.
+By induction on $n$. The base case is $0 = 0$. For the step, \cref{lem:sum-succ}
+splits off the last term, the inductive hypothesis rewrites the head, and
+\cref{lem:even-add,lem:mul-succ} record that $n(n+1)$ stays even along the way —
+so the identity never leaves $\mathbb{N}$.
 \end{proof}
 
 \end{document}
