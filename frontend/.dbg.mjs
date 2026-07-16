@@ -1,0 +1,10 @@
+import { chromium } from 'playwright';
+const b=await chromium.launch(); const page=await b.newPage({viewport:{width:1500,height:1000}});
+const errs=[]; page.on('pageerror',e=>errs.push(e.message)); page.on('console',m=>m.type()==='error'&&errs.push(m.text()));
+await page.goto(process.argv[2]+'/#/examples/gauss',{waitUntil:'networkidle'}); await page.waitForTimeout(2500);
+console.log('url:', page.url());
+console.log('nav/toc items:', await page.locator('.toc a, nav a, [class*=toc] a, .tab, [class*=tab]').allInnerTexts().catch(()=>'?'));
+console.log('body head:', JSON.stringify((await page.locator('body').innerText()).slice(0,200).replace(/\n+/g,' | ')));
+console.log('errors:', errs.length?errs.slice(0,3):'none');
+await page.screenshot({path:process.argv[3]});
+await b.close();

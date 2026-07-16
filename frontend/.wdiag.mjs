@@ -1,0 +1,17 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch();
+const page = await b.newPage({ viewport: { width: 1500, height: 1000 } });
+const logs = [];
+page.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+page.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+page.on('requestfailed', (r) => logs.push('reqfail: ' + r.url() + ' ' + (r.failure()?.errorText || '')));
+await page.goto(process.argv[2] + '/#/examples/gauss', { waitUntil: 'networkidle' });
+await page.locator('.navlink', { hasText: 'Dependency graph' }).click();
+await page.waitForSelector('.graph-modal svg', { timeout: 8000 });
+await page.locator('.graph-modal g.node').first().click();
+await page.waitForTimeout(6000);
+console.log('hint:', await page.locator('.gm-hint').innerText().catch(() => '(none)'));
+console.log('clusters:', await page.locator('.graph-modal g.cluster').count());
+console.log('loading overlay:', await page.locator('.gm-gvload').count());
+for (const l of logs) console.log('|', l.slice(0, 200));
+await b.close();
