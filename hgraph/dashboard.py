@@ -312,12 +312,29 @@ def _resolve_blueprint(blueprint, root):
     return bp if bp and Path(bp).exists() else None
 
 
+def _normalize_repo(repo):
+    """``owner/name``, the only spelling the review link can use: the frontend
+    builds ``https://github.com/<repo>/issues/new`` from it, so a full URL here
+    would silently produce a doubled, broken link. A URL is the natural thing to
+    write, though, so accept one and reduce it rather than fail."""
+    if not repo:
+        return None
+    s = str(repo).strip().rstrip("/")
+    s = re.sub(r"^(?:https?://|git@)(?:www\.)?github\.com[:/]", "", s)
+    s = re.sub(r"\.git$", "", s)
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", s):
+        print(f"warning: repo: {repo!r} is not `owner/name` (nor a GitHub URL) — "
+              f"review links disabled for this project")
+        return None
+    return s
+
+
 def _resolve_repo(repo, root):
-    """``owner/name`` for the GitHub-issue review link, from ``--repo`` or the
-    project's ``hgraph/config.yaml`` -> ``site.repo``."""
+    """``owner/name`` for the GitHub-issue review link, from ``--repo`` / the
+    manifest entry, else the project's ``hgraph/config.yaml`` -> ``site.repo``."""
     if repo:
-        return repo
-    return (load_config(root).get("site") or {}).get("repo")
+        return _normalize_repo(repo)
+    return _normalize_repo((load_config(root).get("site") or {}).get("repo"))
 
 
 def project_data(g: Graph, *, title: str, blueprint=None, macros_from=None,

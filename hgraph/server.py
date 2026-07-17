@@ -255,7 +255,7 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
         prefix = "/" + str(p["root"]).strip("/") + "/"
         state = {
             "g": Graph.open(str(proot)), "title": p.get("name", p["root"]),
-            "repo": p.get("repo"), "root": proot,
+            "repo": p.get("repo") or manifest.get("repo"), "root": proot,
         }
         state["cache"] = _SigCache(
             (lambda pr=proot: _tree_sig(*_project_sig_paths(pr))),

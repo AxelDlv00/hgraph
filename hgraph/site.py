@@ -34,6 +34,11 @@ Manifest schema (paths are resolved relative to the manifest file)::
     subtitle: A machine-verified path to the Poincaré conjecture
     overview: overview.md            # optional fragment injected below the hero
                                       # (.md is converted; .html is used verbatim)
+    repo: owner/name                 # optional — the default `repo:` for every
+                                      # project below that does not set its own.
+                                      # Projects of one monorepo share it rather
+                                      # than repeating it per entry. A full
+                                      # GitHub URL is accepted and reduced.
     categories:                      # optional — a line under a category heading.
       Riemannian Geometry: The core machinery: metrics, curvature, geodesics.
       Algebraic Topology:            # the longer spelling, same thing
@@ -66,7 +71,10 @@ Manifest schema (paths are resolved relative to the manifest file)::
                                       # portrait picture, landscape panel)
         links: [{label: Formalization, href: ...}, {label: Docs, href: ...}]
         blurb: Foundations — metrics, curvature, comparison geometry.
-        repo: owner/name             # optional — enables the GitHub-issue review link
+        repo: owner/name             # optional — enables the GitHub-issue review link.
+                                      # Defaults to the page-level `repo:` above;
+                                      # set it only where a project lives in its
+                                      # own repo.
 
 With no ``--manifest``, ``hgraph site`` first looks for a workspace-level
 ``config.yaml`` in this shape next to the project directories; failing that, it
@@ -476,7 +484,7 @@ def write_static_site(manifest: dict, *, base: Path, out_path: str | Path,
     for p in manifest.get("projects", []):
         proot = base / p["root"]
         data = project_data(Graph.open(str(proot)), title=p.get("name", p["root"]),
-                            root=str(proot), repo=p.get("repo"))
+                            root=str(proot), repo=p.get("repo") or manifest.get("repo"))
         data_dir = out_dir / str(p["root"]).strip("/")
         data_dir.mkdir(parents=True, exist_ok=True)
         (data_dir / "data.json").write_text(
