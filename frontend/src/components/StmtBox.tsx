@@ -1,6 +1,7 @@
 import type { StmtBlock, RefEntry, Dep } from '../types';
 import type { CiteNums } from '../latex';
 import { Math as Tex } from './Tex';
+import { Reviews } from './Reviews';
 
 const ABBR: Record<string, string> = {
   definition: 'Def', lemma: 'Lem', theorem: 'Thm', proposition: 'Prop',
@@ -24,6 +25,8 @@ export function StmtBox({
   onSelect,
   onNavigate,
   onCite,
+  root,
+  repo,
 }: {
   b: StmtBlock;
   refs: Record<string, RefEntry>;
@@ -34,6 +37,10 @@ export function StmtBox({
   onSelect: (id: string) => void;
   onNavigate: (id: string) => void;
   onCite?: (key: string) => void;
+  /** review target + write path — the meta row offers a review inline, so a
+   *  reader never has to open the graph to file one */
+  root: string;
+  repo: string | null;
 }) {
   const en = b.enrich;
   const st = en ? en.lean_status : 'empty';
@@ -74,6 +81,16 @@ export function StmtBox({
             <span className="mtag pop mathlib" data-lean={b.id}>
               mathlib
             </span>
+          )}
+          {en && (
+            <Reviews
+              className="mtag rv"
+              root={root}
+              target={{ id: b.id, label: b.label || null, title: b.title || null }}
+              reviews={en.reviews}
+              comments={en.comments}
+              repo={repo}
+            />
           )}
         </div>
       )}

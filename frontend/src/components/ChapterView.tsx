@@ -76,11 +76,15 @@ function ChapterOverview({ ch, refs, onGoto }: { ch: Chapter; refs: Record<strin
   );
 }
 
-/** The anchor id a block answers to (deep links, \ref clicks, TOC jumps). */
-function blockAnchor(b: BlockT): string | null {
+/** The anchor id a block answers to (deep links, \ref clicks, TOC jumps, and
+ * a bibliography "Cited in" jump). Statements and numbered headings keep their
+ * semantic ids; every other block gets a positional `blk-<index>` so a prose
+ * or proof citation is addressable too (unique within the mounted chapter —
+ * only one chapter is in the DOM at a time). */
+function blockAnchor(b: BlockT, i: number): string {
   if (b.t === 'stmt' && b.id) return `stmt-${b.id}`;
   if (b.t === 'head' && b.num) return `sec-${b.num}`;
-  return null;
+  return `blk-${i}`;
 }
 
 /** A not-yet-hydrated block: keeps the block's anchor id and roughly its
@@ -119,6 +123,8 @@ export function ChapterView({
   onNavigate,
   onCite,
   anchor,
+  root,
+  repo,
 }: {
   chapter: Chapter;
   refs: Record<string, RefEntry>;
@@ -131,6 +137,9 @@ export function ChapterView({
   onCite?: (key: string) => void;
   /** element id a pending scroll wants to land on (see ProjectView.navigate) */
   anchor?: string | null;
+  /** passed through to each statement's review panel (see StmtBox) */
+  root: string;
+  repo: string | null;
 }) {
   const blocks = chapter.blocks;
   const [mounted, setMounted] = useState(() => Math.min(INITIAL_BLOCKS, blocks.length));
@@ -142,7 +151,7 @@ export function ChapterView({
   // render paid before hydration existed.
   useLayoutEffect(() => {
     if (!anchor) return;
-    const idx = blocks.findIndex((b) => blockAnchor(b) === anchor);
+    const idx = blocks.findIndex((b, i) => blockAnchor(b, i) === anchor);
     if (idx >= 0) setMounted((m) => Math.max(m, idx + 1));
   }, [anchor, blocks]);
 
@@ -175,6 +184,7 @@ export function ChapterView({
         <BlockView
           key={i}
           b={b}
+          anchorId={blockAnchor(b, i)}
           refs={refs}
           cites={cites}
           macros={macros}
@@ -183,6 +193,8 @@ export function ChapterView({
           onSelect={onSelect}
           onNavigate={onNavigate}
           onCite={onCite}
+          root={root}
+          repo={repo}
         />
       ))}
       {blocks.slice(mounted).map((b, j) => (

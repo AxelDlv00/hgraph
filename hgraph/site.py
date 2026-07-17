@@ -32,6 +32,11 @@ Manifest schema (paths are resolved relative to the manifest file)::
 
     title: OpenGA — Poincaré Formalization
     subtitle: A machine-verified path to the Poincaré conjecture
+    tab_title: OpenGA                # optional — the browser-tab <title>; falls
+                                      # back to brand, then title, then "hgraph"
+    favicon: img/logo.svg            # optional — the tab icon: a path relative
+                                      # to this manifest (inlined), a URL/data
+                                      # URI, or an emoji (🌀) drawn onto an SVG
     overview: overview.md            # optional fragment injected below the hero
                                       # (.md is converted; .html is used verbatim)
     repo: owner/name                 # optional — the default `repo:` for every
@@ -88,6 +93,8 @@ one card (paths are relative to the project root)::
     site:
       title: do Carmo — Riemannian Geometry
       subtitle: The shared foundation — metrics, connections, curvature.
+      tab_title: do Carmo        # optional — browser-tab <title> (see above)
+      favicon: img/logo.svg      # optional — tab icon: path / URL / emoji
       overview: overview.md      # without one the page is a hero and a lone card
       repo: owner/name
       card_title: Blueprint      # the card's own name; defaults to `title`, but
@@ -105,6 +112,7 @@ import json
 import mimetypes
 import re
 import shutil
+import urllib.parse
 from pathlib import Path
 
 import yaml
@@ -344,6 +352,88 @@ def _card_image(value, *, base: Path) -> str | None:
     return f"data:{ctype};base64,{base64.b64encode(raw).decode('ascii')}"
 
 
+# image suffixes that mark a bare `favicon:` value as a file path rather than
+# an emoji, even when it names no directory (a bare "logo.svg" next to the
+# manifest)
+_FAVICON_EXTS = (".svg", ".png", ".ico", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+def _favicon_source(value, *, base: Path) -> tuple[str, str | None] | None:
+    """Resolve a manifest ``favicon:`` to ``(href, type)`` for a
+    ``<link rel="icon">`` — or ``None`` to leave the page without one.
+
+    Three spellings, each the natural way to reach for it:
+
+    * a URL or ``data:`` URI — used as written;
+    * a path relative to the manifest (``img/logo.svg``) — inlined as a data
+      URI, so the static export and ``hgraph serve`` need no extra asset or
+      route (same reasoning as a card ``image:``);
+    * anything else short — an emoji (``🌀``) or a letter — drawn onto a tiny
+      SVG, the zero-effort way to give a page its own tab icon.
+    """
+    if value is None:
+        return None
+    src = str(value).strip()
+    if not src:
+        return None
+    if re.match(r"^(https?:|data:|//)", src):
+        # a data: URI carries its own media type; a plain URL we type by suffix
+        ctype = None if src.startswith("data:") else mimetypes.guess_type(src)[0]
+        return src, ctype
+    candidate = base / src
+    if "/" in src or "\\" in src or src.lower().endswith(_FAVICON_EXTS) or candidate.is_file():
+        path = candidate.resolve()
+        if not path.is_file():
+            print(f"warning: favicon not found, ignoring: {path}")
+            return None
+        raw = path.read_bytes()
+        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if len(raw) > _INLINE_IMAGE_WARN:
+            print(f"warning: favicon {path.name} is {len(raw) // 1024} KB and is inlined "
+                  f"into the page as-is — a tab icon this large is almost certainly a "
+                  f"mistake; point favicon: at a small .svg/.png or an emoji")
+        return f"data:{ctype};base64,{base64.b64encode(raw).decode('ascii')}", ctype
+    # an emoji / short label -> a self-contained SVG tab icon
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+           '<text x="50" y="52" font-size="72" text-anchor="middle" '
+           f'dominant-baseline="central">{html.escape(src)}</text></svg>')
+    return "data:image/svg+xml," + urllib.parse.quote(svg), "image/svg+xml"
+
+
+def _favicon_link(value, *, base: Path) -> str:
+    """The ``<link rel="icon">`` tag for a manifest ``favicon:``, or ``""``."""
+    src = _favicon_source(value, base=base)
+    if not src:
+        return ""
+    href, ctype = src
+    type_attr = f' type="{_esc(ctype)}"' if ctype else ""
+    return f'<link rel="icon"{type_attr} href="{_esc(href)}" />'
+
+
+def render_index_html(manifest: dict, *, base: Path, data_script: str = "") -> str:
+    """The shipped webui ``index.html`` with this manifest's tab title and
+    favicon applied — and, for the static export, the site-data ``<script>``
+    injected. Shared by :func:`write_static_site` and the live servers so the
+    tab reads the same either way.
+
+    * ``tab_title:`` sets the ``<title>`` (the browser-tab text); it falls back
+      to ``brand:``, then ``title:``, then ``hgraph``.
+    * ``favicon:`` sets the tab icon (see :func:`_favicon_source`).
+    """
+    html_text = (WEBUI_DIR / "index.html").read_text(encoding="utf-8")
+    tab_title = (manifest.get("tab_title") or manifest.get("brand")
+                 or manifest.get("title") or "hgraph")
+    html_text = html_text.replace("<title>hgraph</title>",
+                                  f"<title>{_esc(tab_title)}</title>", 1)
+    icon = _favicon_link(manifest.get("favicon"), base=base)
+    if icon:
+        html_text = html_text.replace("<title>", icon + "\n    <title>", 1)
+    if data_script:
+        html_text = html_text.replace("<!-- __HGRAPH_DATA__:",
+                                      data_script + "<!-- __HGRAPH_DATA__:", 1)
+    return html_text
+
+
 def _category_subtitles(value) -> dict[str, str]:
     """Normalise the manifest's optional ``categories:`` into {category:
     subtitle}. Two spellings, because both are natural to write::
@@ -491,10 +581,9 @@ def write_static_site(manifest: dict, *, base: Path, out_path: str | Path,
             json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
     data = build_site_data(manifest, base=base, overview_html=overview_html)
-    html_text = (WEBUI_DIR / "index.html").read_text(encoding="utf-8")
     inject = f"<script>window.__HGRAPH_DATA__={json.dumps(data, ensure_ascii=False)}</script>\n    "
-    html_text = html_text.replace("<!-- __HGRAPH_DATA__:", inject + "<!-- __HGRAPH_DATA__:")
-    out_path.write_text(html_text, encoding="utf-8")
+    out_path.write_text(render_index_html(manifest, base=base, data_script=inject),
+                        encoding="utf-8")
 
 
 def write_from_manifest(manifest_path: str | Path, *, out_path: str | Path,
@@ -525,7 +614,7 @@ def solo_manifest(site_cfg: dict, *, title: str = "Blueprint", repo=None) -> dic
     site_title = site_cfg.get("title", title)
     card = {k: site_cfg[k] for k in _SOLO_CARD_KEYS if site_cfg.get(k) is not None}
     card.pop("card_title", None)
-    return {
+    manifest = {
         "title": site_title,
         "subtitle": site_cfg.get("subtitle", ""),
         "overview": site_cfg.get("overview"),
@@ -536,6 +625,12 @@ def solo_manifest(site_cfg: dict, *, title: str = "Blueprint", repo=None) -> dic
             **card,
         }],
     }
+    # page-level keys (not card keys) — the header brand and the tab's
+    # title/icon carry over from a solo `site:` block just as from a manifest
+    for k in ("brand", "tab_title", "favicon", "footer"):
+        if site_cfg.get(k) is not None:
+            manifest[k] = site_cfg[k]
+    return manifest
 
 
 def write_solo(site_cfg: dict, *, root: str | Path, out_path: str | Path,

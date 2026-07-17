@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import type { Entry, ReviewData } from '../types';
 
+/** All a review needs to name its target. Narrower than `Entry` on purpose: the
+ * blueprint's own statement boxes carry the id/label/title but not the rest of
+ * an `Entry`, and they review the same nodes. */
+export type ReviewTarget = Pick<Entry, 'id' | 'label' | 'title'>;
+
 /**
  * The review write path, offered as two explicit choices rather than one that
  * silently depends on where the page is served from:
@@ -23,7 +28,7 @@ export function ReviewForm({
   onSubmitted,
 }: {
   root: string;
-  entry: Entry;
+  entry: ReviewTarget;
   repo: string | null;
   onSubmitted: (item: ReviewData) => void;
 }) {
@@ -115,14 +120,19 @@ export function ReviewForm({
       `- **Lean verdict:** ${lean || '—'}\n` +
       `- **Reviewer:** ${author.trim() || '_anonymous_'}\n\n` +
       `**Maths comment**\n\n${c.mc || '_none_'}\n\n` +
-      `**Lean comment**\n\n${c.lc || '_none_'}\n\n` +
-      `---\n_Filed from the hgraph dashboard._\n`;
+      `**Lean comment**\n\n${c.lc || '_none_'}\n`;
     const url =
       `https://github.com/${repo}/issues/new` +
       `?title=${encodeURIComponent(title)}` +
       `&body=${encodeURIComponent(body)}` +
       `&labels=review`;
-    const win = window.open(url, '_blank', 'noopener');
+    // `window.open(..., 'noopener')` returns null *by spec*, whether or not the
+    // popup opened — so the handle could never tell the two apart and every
+    // successful open reported itself blocked. Open without the feature, which
+    // makes the handle meaningful again, and sever `opener` by hand to keep the
+    // new tab from reaching back into this page.
+    const win = window.open(url, '_blank');
+    if (win) win.opener = null;
     setMsg(
       win
         ? { kind: 'note', text: 'Opened a prefilled issue in a new tab — submit it there to file the review.' }

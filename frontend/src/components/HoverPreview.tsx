@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Dep, Entry, ProjectData } from '../types';
-import { leanHi, esc, citeNums } from '../latex';
+import { leanHi, esc, citeNums, proseHtml } from '../latex';
 import { localDepGraph } from '../depgraph';
 import { stmtPreviewHtml } from '../previews';
 import { CHAPTER_ID_RE } from '../graphDot';
@@ -63,6 +63,21 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
       const fields = [b.author, b.title, b.year].filter(Boolean).join(', ');
       return `<div class="pk">Reference [${b._n}]</div><div style="margin-top:5px;line-height:1.5">${esc(fields)}${b.url ? ` <a href="${esc(b.url)}" target="_blank" rel="noopener">↗</a>` : ''}</div>`;
     }
+    // preview for a bibliography "Cited in" link (`.citeloc[data-loc]`, encoded
+    // "<chapterIndex>:<blockIndex>"): the citing passage itself, so the reader
+    // sees *what* in the text cites the reference before clicking through
+    const refs = data.refs || {};
+    function locPreview(loc: string): string | null {
+      const [ci, bi] = loc.split(':').map(Number);
+      const b = data.chapters?.[ci]?.blocks?.[bi];
+      if (!b) return null;
+      if (b.t === 'stmt') return b.id ? stmtPreview(b.id) : null;
+      if (b.t === 'prose' || b.t === 'proof') {
+        const head = b.t === 'proof' ? 'Cited in proof' : 'Cited passage';
+        return `<div class="pk">${head}</div><div>${proseHtml(b.tex, refs, cites).slice(0, 1600)}</div>`;
+      }
+      return null;
+    }
     function graphPreview(id: string): string | null {
       const e = byId.get(id);
       if (!e) return null;
@@ -101,6 +116,9 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
     function onOver(ev: MouseEvent) {
       if (pinnedRef.current) return;
       const t = ev.target as HTMLElement;
+      // a bibliography "Cited in" link — carries `data-loc`, and is also a
+      // `.ref`, so it must be matched before the plain `.ref[data-id]` branch
+      const locEl = t.closest('.citeloc[data-loc]') as HTMLElement | null;
       const refEl = t.closest('.ref[data-id]') as HTMLElement | null;
       const leanEl = t.closest('.leanref[data-name]') as HTMLElement | null;
       const citeEl = t.closest('.cite[data-cite]') as HTMLElement | null;
@@ -109,7 +127,13 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
       // synthetic `ch<N>` for a collapsed chapter box — those don't preview)
       const graphNodeEl = t.closest('.node[data-nid]') as HTMLElement | null;
       window.clearTimeout(hideT.current);
-      if (citeEl) {
+      if (locEl?.dataset.loc) {
+        const loc = locEl.dataset.loc;
+        showT.current = window.setTimeout(() => {
+          const h = locPreview(loc);
+          if (h) show(h, ev.clientX, ev.clientY);
+        }, 110);
+      } else if (citeEl) {
         showT.current = window.setTimeout(() => show(citePreview(citeEl.dataset.cite!), ev.clientX, ev.clientY), 110);
       } else if (refEl?.dataset.id) {
         showT.current = window.setTimeout(() => {

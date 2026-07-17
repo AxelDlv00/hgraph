@@ -1,9 +1,8 @@
-import { useState } from 'react';
-import type { Entry, ReviewData, Dep, RefEntry } from '../types';
+import type { Entry, Dep, RefEntry } from '../types';
 import { leanHi, type CiteNums } from '../latex';
 import { Math as Tex } from './Tex';
 import { StatusBadge } from './StatusBadge';
-import { ReviewForm } from './ReviewForm';
+import { Reviews } from './Reviews';
 import { localDepGraph } from '../depgraph';
 
 const ABBR: Record<string, string> = {
@@ -62,7 +61,6 @@ export function StatementCard({
   /** clicking a \ref link in the body selects that statement */
   onNavigate?: (id: string) => void;
 }) {
-  const [reviews, setReviews] = useState(entry.reviews);
   const ups = entry.deps.map((d) => byId.get(d.id)).filter((x): x is Entry => !!x);
   const downs = usedBy.map((d) => byId.get(d.id)).filter((x): x is Entry => !!x);
 
@@ -105,51 +103,7 @@ export function StatementCard({
       <h3>Dependencies</h3>
       <div dangerouslySetInnerHTML={{ __html: localDepGraph(entry, ups, downs, true) }} />
 
-      <details className="stmt-reviews">
-        <summary>
-          {reviews.length} review{reviews.length === 1 ? '' : 's'} · {entry.comments.length} comment
-          {entry.comments.length === 1 ? '' : 's'}
-        </summary>
-        {reviews.map((r, i) => (
-          <div key={i} className="ritem">
-            <span>{r.author || 'anon'}</span>
-            <span className="k">{(r.created || '').slice(0, 10)}</span>
-            <div className="rmeta">
-              {r.maths_verdict && (
-                <span className="p">
-                  maths: <b>{r.maths_verdict}</b>
-                </span>
-              )}
-              {r.lean_verdict && (
-                <span className="p">
-                  lean: <b>{r.lean_verdict}</b>
-                </span>
-              )}
-            </div>
-            {(r.maths_comment || r.lean_comment) && (
-              <div className="rmeta">{[r.maths_comment, r.lean_comment].filter(Boolean).join(' — ')}</div>
-            )}
-          </div>
-        ))}
-        {entry.comments.map((c, i) => (
-          <div key={i} className="ritem">
-            <span>{c.author || 'anon'}</span>
-            <span className="k">{(c.created || '').slice(0, 10)}</span>
-            {c.title && (
-              <div className="rmeta">
-                <b>{c.title}</b>
-              </div>
-            )}
-            <div className="rmeta">{c.text}</div>
-          </div>
-        ))}
-        <ReviewForm
-          root={root}
-          entry={entry}
-          repo={repo}
-          onSubmitted={(item: ReviewData) => setReviews((rs) => [...rs, item])}
-        />
-      </details>
+      <Reviews root={root} target={entry} reviews={entry.reviews} comments={entry.comments} repo={repo} />
     </div>
   );
 }

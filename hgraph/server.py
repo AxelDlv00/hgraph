@@ -27,7 +27,7 @@ from pathlib import Path
 
 from .dashboard import _resolve_blueprint, project_data
 from .graph import Graph
-from .site import WEBUI_DIR, build_site_data
+from .site import WEBUI_DIR, build_site_data, render_index_html
 
 
 def _tree_sig(*paths: Path | str | None) -> tuple:
@@ -142,6 +142,18 @@ def _load_webui_assets() -> dict[str, tuple[bytes, str]]:
     return assets
 
 
+def _apply_index_config(webui: dict[str, tuple[bytes, str]], manifest: dict,
+                        base: Path) -> None:
+    """Rewrite the served ``index.html`` (and its ``/`` alias) with the
+    manifest's tab title + favicon, so a live ``hgraph serve`` tab reads the
+    same as a static export. No data script — the live page fetches
+    ``/api/site`` instead."""
+    idx = render_index_html(manifest, base=base).encode("utf-8")
+    for key in ("/", "/index.html"):
+        if key in webui:
+            webui[key] = (idx, webui[key][1])
+
+
 def _apply_attachment(g: Graph, kind: str, data: dict) -> dict:
     """Validate + write one ``POST /api/{review,comment}`` body; returns the
     JSON-able item to echo back. Raises ``ValueError`` on bad input."""
@@ -178,6 +190,7 @@ def serve(g: Graph, *, host: str = "127.0.0.1", port: int = 8000,
     manifest = solo_manifest(site_cfg, title=title, repo=repo)
     site_title = manifest["title"]
     webui = _load_webui_assets()
+    _apply_index_config(webui, manifest, Path(root))
 
     sig_paths = _project_sig_paths(root)
     if macros_from:
@@ -249,6 +262,7 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
     ``/<root>/`` — one process, one port, instead of one `hgraph serve` per
     project."""
     webui = _load_webui_assets()
+    _apply_index_config(webui, manifest, base)
     mounted: dict[str, dict] = {}
     for p in manifest.get("projects", []):
         proot = base / p["root"]

@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
-import type { BibEntry, Entry, RefEntry } from '../types';
+import { useEffect, useMemo, useRef } from 'react';
+import type { BibEntry, Chapter } from '../types';
 import { detex, esc } from '../latex';
 import { typesetMath } from '../typeset';
+import { buildCiteIndex } from '../citeindex';
 
 function bibAuthors(a: string | null): string {
   if (!a) return '';
@@ -35,38 +36,24 @@ function fmtBib(b: BibEntry): string {
 }
 
 /** The "Blueprint bibliography" tab — every `.bib` entry, formatted, with a
- * "cited from" back-reference list built by scanning entry bodies for
- * `\cite{...}` — ported from the original's `renderBiblio`/`fmtBib` and the
- * `CITES` reverse index built in `index()`. */
+ * "Cited in" list of every place in the document that `\cite`s it. Unlike the
+ * old reverse index (which scanned only statement bodies), this uses
+ * `buildCiteIndex` over the whole chapter tree, so citations that live in the
+ * prose or proofs *between* the lemmas are listed too. Each location links to
+ * the block; hovering it previews the citing passage (see HoverPreview's
+ * `.citeloc` handling). */
 export function Bibliography({
   bib,
-  entries,
-  refs,
-  onSelect,
+  chapters,
+  onGotoLoc,
   flashKey,
 }: {
   bib: BibEntry[];
-  entries: Entry[];
-  refs: Record<string, RefEntry>;
-  onSelect: (id: string) => void;
+  chapters: Chapter[];
+  onGotoLoc: (chapterIndex: number, blockIndex: number, anchor: string) => void;
   flashKey?: string | null;
 }) {
-  const cites = new Map<string, string[]>();
-  // keep in step with latex.ts's \cite rule: every natbib variant
-  // (\citet, \citealp, \citeauthor, …) plus an optional [page] argument
-  const cre = /\\cite[a-zA-Z]*\*?(?:\[[^\]]*\])?\{([^{}]*)\}/g;
-  for (const e of entries) {
-    cre.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = cre.exec(e.body || ''))) {
-      for (let k of m[1].split(',')) {
-        k = k.trim();
-        if (!k) continue;
-        if (!cites.has(k)) cites.set(k, []);
-        cites.get(k)!.push(e.id);
-      }
-    }
-  }
+  const cites = useMemo(() => buildCiteIndex(chapters), [chapters]);
 
   const ref = useRef<HTMLDivElement | null>(null);
   // a bib title/journal can itself contain math ($...$) left un-rendered by
@@ -89,7 +76,7 @@ export function Bibliography({
         </div>
       )}
       {bib.map((b, i) => {
-        const cb = cites.get(b.key) || [];
+        const locs = cites.get(b.key) || [];
         return (
           <div className={`bibitem${flashKey === b.key ? ' flash' : ''}`} key={b.key} data-key={b.key}>
             <div className="bi-t">
@@ -104,24 +91,22 @@ export function Bibliography({
               )}
             </div>
             <div className="bi-c">
-              Cited from ({cb.length})
-              {cb.length > 0 ? ': ' : ''}
-              {cb
-                .map((id) => {
-                  const e = entries.find((x) => x.id === id);
-                  if (!e) return null;
-                  const r = (e.label && refs[e.label]) || null;
-                  const label = r?.abbr ? `${r.abbr} ${r.num}` : (e.label || id).replace(/^[a-z]+:/, '');
-                  return (
-                    // `data-id` is what HoverPreview delegates on — without it
-                    // these read as cross-reference links but never preview
-                    <a className="ref" key={id} data-id={id} onClick={() => onSelect(id)}>
-                      {label}
-                    </a>
-                  );
-                })
-                .filter(Boolean)
-                .reduce((acc: React.ReactNode[], el, idx) => (idx === 0 ? [el] : [...acc, ', ', el]), [])}
+              Cited in ({locs.length})
+              {locs.length > 0 ? ': ' : ''}
+              {locs.map((loc, j) => (
+                <span key={`${loc.anchor}-${j}`}>
+                  {j > 0 && ', '}
+                  {/* `.citeloc[data-loc]` is what HoverPreview delegates on to
+                      preview the citing passage; the click jumps to it */}
+                  <a
+                    className="ref citeloc"
+                    data-loc={`${loc.chapterIndex}:${loc.blockIndex}`}
+                    onClick={() => onGotoLoc(loc.chapterIndex, loc.blockIndex, loc.anchor)}
+                  >
+                    {loc.label}
+                  </a>
+                </span>
+              ))}
             </div>
           </div>
         );

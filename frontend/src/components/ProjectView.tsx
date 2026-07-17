@@ -147,6 +147,22 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     });
   }
 
+  // jump to a specific citing block from the bibliography's "Cited in" list —
+  // like navigate(), but the target is any block (prose/proof included), keyed
+  // by its ChapterView anchor rather than a statement id
+  const gotoLoc = useCallback((chapterIndex: number, _blockIndex: number, blockAnchor: string) => {
+    setView('doc');
+    setQuery('');
+    setStatusFilter(new Set());
+    setCurCh(chapterIndex);
+    setSelectedId(null);
+    setAnchor(blockAnchor);
+    requestAnimationFrame(() => {
+      document.getElementById(blockAnchor)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    flashEl(blockAnchor);
+  }, []);
+
   function gotoChapter(chapterIndex: number) {
     setView('doc');
     setQuery('');
@@ -324,7 +340,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
           {view === 'summary' ? (
             <Summary entries={data.entries} chapters={chapters} refs={refs} onSelect={navigate} onGotoChapter={gotoChapter} />
           ) : view === 'biblio' ? (
-            <Bibliography bib={data.bib} entries={data.entries} refs={refs} onSelect={navigate} flashKey={flashBibKey} />
+            <Bibliography bib={data.bib} chapters={chapters} onGotoLoc={gotoLoc} flashKey={flashBibKey} />
           ) : showResults && filtered ? (
             <div className="doc">
               <h2 className="ch">Results · {filtered.length}</h2>
@@ -341,6 +357,8 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
                   onSelect={navigate}
                   onNavigate={navigate}
                   onCite={onCite}
+                  root={root}
+                  repo={data.repo}
                 />
               ))}
               {filtered.length > MAX_RESULTS && (
@@ -364,6 +382,8 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
               onNavigate={navigate}
               onCite={onCite}
               anchor={anchor}
+              root={root}
+              repo={data.repo}
             />
           ) : (
             <FlatList data={data} onSelect={navigate} />

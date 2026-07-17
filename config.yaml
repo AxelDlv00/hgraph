@@ -4,6 +4,8 @@
 brand: hgraph          # the sticky header's name; falls back to `title` if unset
 title: hgraph examples
 subtitle: A plain-files semantic graph for autoformalization — two small worked examples
+tab_title: hgraph examples   # the browser-tab <title>; falls back to brand, then title
+favicon: 🕸️             # the tab icon: a path (inlined), a URL/data URI, or an emoji
 overview: overview.md
 projects:
   - name: Gauss summation

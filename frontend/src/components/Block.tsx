@@ -11,6 +11,7 @@ import { StmtBox } from './StmtBox';
  * content and forces a KaTeX re-typeset (see Tex.tsx). */
 export const BlockView = memo(function BlockView({
   b,
+  anchorId,
   refs,
   cites,
   macros,
@@ -19,8 +20,14 @@ export const BlockView = memo(function BlockView({
   onSelect,
   onNavigate,
   onCite,
+  root,
+  repo,
 }: {
   b: BlockT;
+  /** element id for deep-links / bibliography "Cited in" jumps — stmt and head
+   * blocks set their own semantic ids, so this is what makes prose/proof
+   * addressable (see ChapterView's blockAnchor) */
+  anchorId?: string;
   refs: Record<string, RefEntry>;
   cites?: CiteNums;
   macros: Record<string, string>;
@@ -29,6 +36,9 @@ export const BlockView = memo(function BlockView({
   onSelect: (id: string) => void;
   onNavigate: (id: string) => void;
   onCite?: (key: string) => void;
+  /** passed through to a statement's review panel (see StmtBox) */
+  root: string;
+  repo: string | null;
 }) {
   if (b.t === 'head') {
     const level = b.level > 4 ? 4 : b.level;
@@ -41,7 +51,7 @@ export const BlockView = memo(function BlockView({
     );
   }
   if (b.t === 'prose')
-    return <Tex as="p" className="prose" text={b.tex} macros={macros} refs={refs} cites={cites} onNavigate={onNavigate} onCite={onCite} />;
+    return <Tex as="p" id={anchorId} className="prose" text={b.tex} macros={macros} refs={refs} cites={cites} onNavigate={onNavigate} onCite={onCite} />;
   if (b.t === 'stmt')
     return (
       <StmtBox
@@ -54,11 +64,13 @@ export const BlockView = memo(function BlockView({
         onSelect={onSelect}
         onNavigate={onNavigate}
         onCite={onCite}
+        root={root}
+        repo={repo}
       />
     );
   if (b.t === 'proof')
     return (
-      <details className="proof">
+      <details className="proof" id={anchorId}>
         <summary>Proof</summary>
         <Tex as="div" className="pbody" text={b.tex} macros={macros} refs={refs} cites={cites} onNavigate={onNavigate} onCite={onCite} />
       </details>

@@ -871,6 +871,31 @@ blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--
 .mtag.lean { background: var(--lean-bg); color: var(--lean); }
 .mtag.mathlib { background: var(--mathlib-bg); color: var(--mathlib); }
 
+/* The review panel rides in the statement's meta row. It is a <details>, not a
+   plain tag: closed, its summary is styled to read as one more chip beside
+   "uses N · used by N"; open, it claims a whole row of its own (the row already
+   wraps) so the form is never squeezed between the tags. */
+.mtag.rv { padding: 0; background: none; border: none; white-space: normal; }
+.mtag.rv > summary {
+  list-style: none;
+  display: inline-block;
+  font-size: 11.5px;
+  padding: 2px 9px;
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.mtag.rv > summary::-webkit-details-marker { display: none; }
+.mtag.rv > summary::marker { content: ''; }
+.mtag.rv > summary:hover { border-color: var(--accent); color: var(--heading); }
+.mtag.rv[open] { flex-basis: 100%; }
+.mtag.rv[open] > summary { margin-bottom: 8px; color: var(--heading); border-color: var(--line); }
+
 .ref { color: var(--accent); font-weight: 550; cursor: pointer; white-space: nowrap; }
 .ref:hover { text-decoration: underline; }
 .xref { color: var(--muted); }
@@ -1000,5 +1025,6 @@ pre.lean { background: #f8f9fb; border: 1px solid var(--line); border-radius: 8p
 .bibitem .bi-t { line-height: 1.55; }
 .bibitem .bi-n { color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 2px; }
 .bibitem .bi-c { font-size: 12.5px; color: var(--muted); margin-top: 5px; }
-.stmt.flash, .bibitem.flash { animation: flash 1.7s ease; }
+.bibitem .bi-c .citeloc { font-variant-numeric: tabular-nums; }
+.stmt.flash, .bibitem.flash, .prose.flash, details.proof.flash { animation: flash 1.7s ease; border-radius: 6px; }
 @keyframes flash { 0%, 20% { background: #fff6d6; } 100% { background: var(--panel); } }

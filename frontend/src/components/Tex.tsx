@@ -19,6 +19,7 @@ export function Math({
   cites,
   as: As = 'span',
   className,
+  id,
   onNavigate,
   onCite,
 }: {
@@ -29,6 +30,8 @@ export function Math({
   cites?: CiteNums;
   as?: 'span' | 'div' | 'p';
   className?: string;
+  /** element id for deep-links / bibliography "Cited in" jumps */
+  id?: string;
   onNavigate?: (id: string) => void;
   onCite?: (key: string) => void;
 }) {
@@ -55,6 +58,7 @@ export function Math({
   return (
     <As
       ref={ref as never}
+      id={id}
       className={className}
       dangerouslySetInnerHTML={{ __html: html }}
       onClick={(e: React.MouseEvent) => {
