@@ -992,8 +992,22 @@ pre.lean { background: #f8f9fb; border: 1px solid var(--line); border-radius: 8p
 .gv-inner { flex: none; transform-origin: center; will-change: transform; }
 .gv-inner svg { display: block; overflow: visible; }
 .gv-inner .node { cursor: pointer; }
+.gv-inner .node, .gv-inner .edge { transition: opacity 120ms ease; }
 .gv-inner .node:hover path, .gv-inner .node:hover ellipse { stroke-width: 3; }
 .gv-inner .cluster { cursor: pointer; }
+.gv-inner g.node.gm-node-dependency polygon,
+.gv-inner g.node.gm-node-dependency ellipse,
+.gv-inner g.node.gm-node-dependency path { stroke: #2563eb !important; stroke-width: 3px !important; }
+.gv-inner g.node.gm-node-dependent polygon,
+.gv-inner g.node.gm-node-dependent ellipse,
+.gv-inner g.node.gm-node-dependent path { stroke: #f59e0b !important; stroke-width: 3px !important; }
+.gv-inner g.node.gm-node-selected polygon,
+.gv-inner g.node.gm-node-selected ellipse,
+.gv-inner g.node.gm-node-selected path { stroke: #111827 !important; stroke-width: 3.2px !important; }
+.gv-inner g.edge.gm-edge-incoming path { stroke: #2563eb !important; stroke-width: 2.8px !important; }
+.gv-inner g.edge.gm-edge-incoming polygon { stroke: #2563eb !important; fill: #2563eb !important; }
+.gv-inner g.edge.gm-edge-outgoing path { stroke: #f59e0b !important; stroke-width: 2.8px !important; }
+.gv-inner g.edge.gm-edge-outgoing polygon { stroke: #f59e0b !important; fill: #f59e0b !important; }
 
 .gm-sel { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font: inherit; font-size: 13px; color: var(--heading); }
 .gm-q { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font: inherit; font-size: 13px; min-width: 150px; }

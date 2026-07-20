@@ -83,6 +83,19 @@ export function GraphModal({
   const dragRef = useRef<{ id: number; x: number; y: number; moved: number; captured: boolean } | null>(null);
   const suppressClick = useRef(false);
 
+  // A dependency jump from the side panel may target a node in another
+  // chapter. Open that chapter so the selected node and its incident arrows
+  // are always present in the rendered graph.
+  useEffect(() => {
+    if (!selectedId) return;
+    const ni = model.idx.get(selectedId);
+    if (ni != null) {
+      const node = model.nodes[ni];
+      setExpanded(new Set([node.ch]));
+      setLvlMax((current) => Math.max(current, node.lvl));
+    }
+  }, [selectedId, model]);
+
   function applyTransform() {
     rafRef.current = 0;
     const el = innerRef.current;
@@ -295,6 +308,7 @@ export function GraphModal({
         // exactly one chapter open at a time: opening this one closes any
         // other, so the graph stays about the chapter you asked for while
         // the rest remain as boxes for cross-chapter context
+        onSelect(null);
         setExpanded(new Set([Number(m[1])]));
       } else if (model.idx.has(id)) {
         onSelect(id);
@@ -304,6 +318,7 @@ export function GraphModal({
     const clusterEl = target.closest('g.cluster') as SVGGElement | null;
     if (clusterEl?.dataset.ch != null) {
       const ch = Number(clusterEl.dataset.ch);
+      onSelect(null);
       setExpanded((s) => {
         const next = new Set(s);
         next.delete(ch);
@@ -312,16 +327,30 @@ export function GraphModal({
     }
   }
 
-  // --- status/search filter: dim non-matching nodes+edges, never hide (level
-  // filtering already happened by regenerating the DOT above). The SVG is
-  // injected imperatively above, so React never resets these inline styles —
-  // re-run only when the layout or the filters actually change. -------------
+  // --- status/search + selected neighbourhood: dim non-matching nodes/edges,
+  // never hide (level filtering already happened by regenerating the DOT
+  // above). A selection keeps its direct incoming/outgoing arrows and their
+  // endpoints prominent while fading the rest of the graph. -----------------
   useEffect(() => {
     const svgEl = wrapRef.current?.querySelector('svg');
     if (!svgEl) return;
     const q = query.trim().toLowerCase();
     const active = statusFilter.size > 0 || !!q;
     const passByNid = new Map<string, boolean>();
+
+    const dependencies = new Set<string>();
+    const dependents = new Set<string>();
+    svgEl.querySelectorAll('g.edge').forEach((g) => {
+      const el = g as SVGGElement;
+      const parts = (el.dataset.edge || '').split('->', 2).map((s) => s.trim());
+      const incoming = !!selectedId && parts.length === 2 && parts[1] === selectedId;
+      const outgoing = !!selectedId && parts.length === 2 && parts[0] === selectedId;
+      if (incoming) dependencies.add(parts[0]);
+      if (outgoing) dependents.add(parts[1]);
+      el.classList.toggle('gm-edge-incoming', incoming);
+      el.classList.toggle('gm-edge-outgoing', outgoing);
+    });
+
     svgEl.querySelectorAll('g.node').forEach((g) => {
       const el = g as SVGGElement;
       const id = el.dataset.nid || '';
@@ -329,17 +358,28 @@ export function GraphModal({
       const n = ni != null ? model.nodes[ni] : undefined;
       const pass = !n || statusPasses(n.e, statusFilter, q);
       if (n) passByNid.set(id, pass);
-      el.style.opacity = active && n && !pass ? '0.12' : '1';
+      const isSelected = !!selectedId && id === selectedId;
+      const isDependency = dependencies.has(id);
+      const isDependent = dependents.has(id);
+      el.classList.toggle('gm-node-selected', isSelected);
+      el.classList.toggle('gm-node-dependency', isDependency);
+      el.classList.toggle('gm-node-dependent', isDependent);
+      el.style.opacity = selectedId
+        ? (isSelected || isDependency || isDependent ? '1' : '0.12')
+        : (active && n && !pass ? '0.12' : '1');
     });
     svgEl.querySelectorAll('g.edge').forEach((g) => {
       const el = g as SVGGElement;
       const parts = (el.dataset.edge || '').split('->').map((s) => s.trim());
       if (parts.length !== 2) return;
+      const incident = parts[1] === selectedId || parts[0] === selectedId;
       const ap = passByNid.has(parts[0]) ? passByNid.get(parts[0]) : true;
       const bp = passByNid.has(parts[1]) ? passByNid.get(parts[1]) : true;
-      el.style.opacity = active && (!ap || !bp) ? '0.06' : '1';
+      el.style.opacity = selectedId
+        ? (incident ? '1' : '0.06')
+        : (active && (!ap || !bp) ? '0.06' : '1');
     });
-  }, [svg, query, statusFilter, model]);
+  }, [svg, query, statusFilter, selectedId, model]);
 
   // --- Escape: clear selection first, then close ----------------------------
   useEffect(() => {
@@ -396,7 +436,10 @@ export function GraphModal({
           onChange={(e) => {
             const v = e.target.value;
             setChapterPick('');
-            if (v !== '') setExpanded(new Set([Number(v)]));
+            if (v !== '') {
+              onSelect(null);
+              setExpanded(new Set([Number(v)]));
+            }
           }}
         >
           <option value="">Open a chapter…</option>
@@ -429,7 +472,15 @@ export function GraphModal({
           </span>
         ))}
         <span className="sp" />
-        <button className="gm-btn" onClick={() => setExpanded(new Set())} disabled={!expanded.size} title="Close the open chapter and go back to the all-chapters overview">
+        <button
+          className="gm-btn"
+          onClick={() => {
+            onSelect(null);
+            setExpanded(new Set());
+          }}
+          disabled={!expanded.size}
+          title="Close the open chapter and go back to the all-chapters overview"
+        >
           All chapters
         </button>
         <button className="gm-btn" onClick={fitToView} title="Fit the whole graph in view">
