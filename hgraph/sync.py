@@ -229,7 +229,13 @@ def _statement_fields(env: str, title, inner: str) -> dict:
         "mathlibok": bool(re.search(r"\\mathlibok\b", inner)),
         "group": _first_arg("group", inner),     # \group{…} → semantic-cluster field
         "level": _first_arg("level", inner),      # \level{coarse|medium|fine} → granularity
-        "ref": _first_arg("dcref", inner),        # \dcref{…} → source-book provenance
+        # Source-book provenance. `\dcref{…}` is the original spelling;
+        # `\source{slug:page-0001}` is what downstream blueprints are authored
+        # with, so accept both (dcref wins if a statement carries both). Both are
+        # stripped from the body by the annotation regex above, so a spelling
+        # that isn't captured here is discarded silently — the statement still
+        # renders and only its citation quietly disappears.
+        "ref": _first_arg("dcref", inner) or _first_arg("source", inner),
         "body": body,
     }
 

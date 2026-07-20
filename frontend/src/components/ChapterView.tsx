@@ -61,9 +61,11 @@ function ChapterOverview({ ch, refs, onGoto }: { ch: Chapter; refs: Record<strin
             {r.stmts.map((b) => {
               const st = b.enrich ? b.enrich.lean_status : 'empty';
               return (
+                // `data-id`: hovering previews the statement (see HoverPreview)
                 <i
                   key={b.id}
                   className="mm"
+                  data-id={b.id}
                   style={{ background: statusColor(st) }}
                   onClick={() => b.id && onGoto(b.id)}
                 />

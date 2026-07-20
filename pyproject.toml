@@ -9,8 +9,10 @@ name = "hgraph"
 version = "0.1.0"
 description = "A plain-files semantic graph for autoformalization"
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.9"
 dependencies = ["PyYAML>=5.1"]
+classifiers = ["License :: OSI Approved :: Apache Software License"]
 
 [project.optional-dependencies]
 # Lets `hgraph site`/`serve` downscale project-card pictures to card size

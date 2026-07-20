@@ -1,280 +1,229 @@
+<div align="center">
+
 # hgraph
 
-![python](https://img.shields.io/badge/python-3.9%2B-blue)
-![status](https://img.shields.io/badge/status-beta-orange)
+**A plain-files semantic graph for Lean autoformalization**
 
-A plain-files semantic graph for autoformalization. Nodes and edges are
-Markdown/YAML files you (or an agent) write through a CLI, or that `sync`
-generates from a leanblueprint `.tex` + your Lean sources — no database, no
-logs. The files *are* the graph; git versions them.
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](./pyproject.toml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green)](./LICENSE)
+![Status](https://img.shields.io/badge/status-beta-orange)
 
-**[Live demo →](https://axeldlv00.github.io/hgraph/)** — a landing page over
-two worked examples (`gauss`, `triangular`), each an interactive blueprint
-dashboard.
+[Live demo](https://axeldlv00.github.io/hgraph/) · [Examples](#examples) · [CLI reference](#cli-reference)
 
-> [!NOTE]
-> First working slice: storage, full CLI, sync, closure/frontier queries, and
-> the dashboard/site UI. See [Status](#status).
+</div>
 
-## What this is
+---
 
-A node is an artifact — an informal statement (`type: tex`), a Lean
-declaration (`type: lean`), a proof, a source quote — stored as one Markdown
-file: a YAML header for metadata, the mathematical content as the body. An
-edge is its own small file per ordered pair (`<source>__<target>.md`); the
-type lives in the YAML, not the filename. Comments and reviews are
-*attachments* under a node's sibling directory, not extra nodes.
+`hgraph` connects informal mathematics, Lean declarations, proofs, sources,
+comments, and reviews in a graph that both people and agents can edit. Each
+node and edge is a Markdown file with YAML metadata: there is no database or
+event log. The files are the graph, and Git provides its history.
 
-```
-<project>/hgraph/
-  nodes/<id>.md            one file per node: YAML header (metadata) + content body
-  nodes/<id>/              sibling dir, created only if the node has attachments
-    comment-1.md              a freeform note: {author, date, title} header + body
-    review-1.md                a Maths/Lean good-or-bad verdict (see Fields)
-  edges/<src>__<tgt>.md    one file per ordered pair: YAML header (type, hard, note)
-```
+`hgraph sync` can generate this graph from a
+[leanblueprint](https://github.com/PatrickMassot/leanblueprint) `.tex` file and
+Lean sources. The CLI then exposes dependency queries, proof frontiers, and a
+web interface for exploring and reviewing one project or an entire workspace.
 
-Every node id is a uniform opaque hash: synced nodes hash their `\label` /
-Lean `decl`; hand-added nodes hash a `--key` (default: the title). Reference
-any of them without knowing the hash via `label:…` / `decl:…` / `key:…`.
+## Highlights
 
-Edges are typed and fall into three classes — there's no more granularity
-than this, because `sync` only ever needs to express two relationships
-(`\uses` and `\lean`):
+- **Plain files.** Inspect, edit, diff, and version every node and edge.
+- **Blueprint-to-Lean sync.** Import `\label`, `\uses`, `\lean`, and
+  `\mathlibok` metadata without overwriting authored fields.
+- **Agent-friendly queries.** Find ancestors, descendants, blocked statements,
+  and the next ready-to-prove frontier; listing commands support bounded and
+  JSON output.
+- **Flexible references.** Address nodes by `label:…`, `decl:…`, or `key:…`
+  instead of opaque IDs.
+- **Live and static sites.** Browse dependencies, Lean code, comments, and
+  reviews locally or publish the same interface as a static site.
+- **Multi-project workspaces.** Combine several formalization projects under
+  one landing page and deployment.
 
-- **hard** — `uses` (from `\uses{}`, statement or proof alike). This is the
-  DAG you schedule on.
-- **identity (soft)** — `formalizes` (from `\lean{}`): two nodes are the
-  *same* object in different forms; these merge in the union view.
-- **associative (soft)** — `related_to`: related but *distinct* — quotes,
-  alternative proofs, anything hand-drawn that isn't a dependency.
+## Quick start
 
-## Fields
-
-Ownership: **[derived]** — written only by `sync`, never touched otherwise;
-**[authored]** — written by a human/agent (CLI, dashboard, or by hand) and
-left untouched by `sync`. Re-running `sync` is therefore idempotent.
-
-**Node** (`nodes/<id>.md` header)
-
-| field | values | owner |
-|---|---|---|
-| `id` | `sha1("<kind>:<key>")[:12]` | derived |
-| `label` / `decl` / `key` | the blueprint `\label` / Lean fq-name / hand-added `--key` | derived / derived / authored |
-| `generated` | `blueprint` \| `lean` (absent on hand-added nodes) | derived |
-| `title` | text (required) | derived when synced, else authored |
-| `author`, `created`, `updated` | text / ISO timestamp | derived |
-| `type` | `tex` \| `lean` \| `md` | authored |
-| `content_type` | `statement` \| `definition` \| `theorem` \| `lemma` \| `proposition` \| `corollary` \| `proof` \| `example` \| `remark` \| `conjecture` \| `quote` \| `instance` | derived when synced, else authored |
-| `status` | `false` \| `failed` \| `draft` \| `verified` \| `built` | authored |
-| `lean_status` | `lean_ok` \| `mathlib_ok` \| `sorry` \| `empty` | derived |
-| `mathlib_name` | list of Mathlib decl names | derived |
-| `stale` | `true` (the source `\label`/`decl` vanished; never auto-deleted) | derived |
-| `origin` | `book` \| `article` \| `preprint` \| `textbook` \| `lecture-notes` \| `repository` \| `ai` \| `human` \| `unknown` | authored |
-| `origin_details` | `{work, author, edition, version, chapter, section, page, year, url}` | authored |
-| `lang` | `en` \| `fr` \| `de` \| `other` | authored |
-| `tags` | list of free-form labels | authored |
-| `docstring`, `file` | the Lean decl's `/-- … -/` doc, its source path | derived, Lean nodes only |
-
-**Attachment** (`nodes/<id>/{comment,review}-N.md`)
-
-| field | values | kind |
-|---|---|---|
-| `author`, `date` | text / ISO timestamp | both |
-| `title` | short heading | comment |
-| `maths_verdict`, `maths_comment` | `good` \| `bad`, text | review (either axis optional, at least one required) |
-| `lean_verdict`, `lean_comment` | `good` \| `bad`, text | review |
-
-**Edge** (`edges/<source>__<target>.md` header)
-
-| field | values | owner |
-|---|---|---|
-| `source`, `target` | node ids (required) | — |
-| `type` | `uses` (hard) \| `formalizes` (identity, soft) \| `related_to` (associative, soft) | derived when synced, else authored |
-| `hard` | `true`/`false`, auto-filled from `type` | derived |
-| `generated` | `blueprint` (absent on hand-drawn edges) | derived |
-| `note` | text | authored |
-
-## Install
+Requires Python 3.9 or newer.
 
 ```bash
-pip install -e .          # provides the `hgraph` command (needs PyYAML)
+git clone https://github.com/axeldlv00/hgraph.git
+cd hgraph
+python -m pip install -e .
 ```
 
-> [!IMPORTANT]
-> Use the `hgraph` command, not `python -m hgraph`: the latter prepends the
-> current directory to the import path, so inside a project dir the local
-> `hgraph/` **data** directory shadows the real package and `-m` fails to
-> find `hgraph.__main__`.
-
-## Sync — blueprint + Lean as the reference
-
-Point `sync` at a leanblueprint `.tex` and your Lean sources; it parses them
-and fills in the derived structure. `\lean{}` → `formalizes`; `\uses{}`
-(statement or proof) → `uses`; `\mathlibok` → `mathlib_ok` + `mathlib_name`.
+From a project containing a blueprint and Lean sources:
 
 ```bash
 hgraph sync --blueprint blueprint/blueprint.tex --lean Lean
-hgraph sync                       # no flags → read the paths from hgraph/config.yaml
+hgraph stats
+hgraph frontier --type tex --limit 20
+hgraph serve --port 8000
 ```
 
-Two independent node populations, joined many-to-many by `formalizes`: a
-blueprint item is keyed on its `\label`, a Lean declaration on its
-fully-qualified name. `sync` writes only the fields it owns (see Fields
-above); everything a human/agent added is preserved, so re-running it is
-idempotent, and a vanished `\label`/`decl` is flagged `stale`, never deleted.
+Open <http://127.0.0.1:8000> to explore the graph. To avoid repeating source
+paths, add `hgraph/config.yaml`:
 
-## CLI
+```yaml
+blueprint: blueprint/blueprint.tex
+lean: [Lean]
+```
 
-Most of the graph comes from `sync`; the CLI is for the authored layer on
-top. Runs against `./hgraph`; use `--root <dir>` to point elsewhere.
+Then a bare `hgraph sync` is enough.
 
-> [!TIP]
-> Reference nodes by `label:<label>`, `decl:<fqname>`, or `key:<key>` — you
-> never type a hash, and an ambiguous reference is rejected rather than
-> resolved arbitrarily.
+> [!IMPORTANT]
+> Use the installed `hgraph` command inside a project, not `python -m hgraph`.
+> A local `hgraph/` data directory can otherwise shadow the Python package.
+
+## Core model
+
+Each project stores its graph under `hgraph/`:
+
+```text
+hgraph/
+├── config.yaml
+├── nodes/
+│   ├── <id>.md
+│   └── <id>/
+│       ├── comment-1.md
+│       └── review-1.md
+└── edges/
+    └── <source>__<target>.md
+```
+
+A node represents an artifact such as an informal statement, Lean declaration,
+proof, or source quotation. Comments and Maths/Lean reviews are attachments to
+that node. Every ID is a deterministic 12-character hash, but normal CLI use
+relies on human-readable references:
+
+```text
+label:gauss_sum
+decl:Gauss.sum_id
+key:alternate-proof
+```
+
+Edges have three deliberately small categories:
+
+| Type | Meaning | Scheduling |
+| --- | --- | --- |
+| `uses` | The source depends on the target | Hard dependency |
+| `formalizes` | Two nodes express the same object in different forms | Soft identity |
+| `related_to` | Related but distinct artifacts | Soft association |
+
+`sync` owns fields derived from source files, including labels, declaration
+names, document order, Lean status, and generated edges. Authored metadata—such
+as provenance, tags, workflow status, comments, reviews, and hand-drawn
+edges—is preserved across syncs. Removed source items are marked `stale`, never
+silently deleted.
+
+### Dependency states
+
+`lean_status` describes a node locally. Graph queries also account for its
+entire hard-dependency closure:
+
+| State | Meaning |
+| --- | --- |
+| `closed` | The node and all prerequisites are formalized |
+| `ready` | All prerequisites are closed; this node is not |
+| `blocked` | At least one prerequisite remains open |
+| `formalized_open` | The node is formalized, but an upstream dependency is not |
+
+## CLI reference
+
+Commands operate on `./hgraph` by default. Pass `--root <project>` to target a
+different project. Query and listing commands support `--json`; use
+`hgraph <command> -h` for every option.
+
+| Command | Purpose |
+| --- | --- |
+| `hgraph sync` | Update derived graph data from the blueprint and Lean sources |
+| `hgraph stats` | Summarize nodes, statuses, provenance, and graph closure |
+| `hgraph list` | Filter nodes by type, status, tags, text, source, or state |
+| `hgraph get <ref>` | Show a node with its content, links, dependencies, and notes |
+| `hgraph frontier` | Rank statements whose prerequisites are complete |
+| `hgraph ancestors <ref>` | Traverse transitive prerequisites |
+| `hgraph descendants <ref>` | Traverse reverse dependencies |
+| `hgraph view tex\|lean\|union` | Render one graph view, optionally as Graphviz DOT |
+| `hgraph add …` | Add a node, edge, comment, or review |
+| `hgraph modify node …` | Update authored node metadata |
+| `hgraph delete …` | Delete authored graph data |
+| `hgraph serve` | Run the live site with review and comment write-back |
+| `hgraph site` | Export a self-contained static site under `_site/` |
+
+Typical queries:
 
 ```bash
-hgraph add node    --title "théorème central limite" --type tex --origin book
-hgraph add edge    key:clt-lean decl:MeasureTheory.integral --type uses
-hgraph add comment key:clt-lean --author agent --content 'MeasurableSpace instance missing'
-hgraph add review  key:clt-lean --author agent --maths good --lean bad --lean-comment 'proof incomplete'
-
-hgraph get         key:clt-lean          # content + related + deps + ancestors + notes
-hgraph modify node key:clt-lean --set status=verified
-hgraph ancestors   key:clt-lean --names  # transitive dependencies
-hgraph view union                        # tex | lean | union   (+ --dot for Graphviz)
-hgraph delete node key:clt-lean          # cascades to its edges
+hgraph list --type tex --lean-status sorry --limit 20
+hgraph list --tag flagship --sort chapter --json
+hgraph list --match "central limit"
+hgraph list --stale
+hgraph list --state ready
+hgraph ancestors label:gauss_sum --names
 ```
 
-**Query, don't scroll.** Every listing takes `--limit N` and `--json`;
-`list` is a small query engine over the authored + derived fields:
+An ambiguous human-readable reference is rejected rather than guessed. Adding
+an edge to an occupied source/target pair is also rejected unless `--replace`
+is explicit.
 
-```bash
-hgraph stats                                                # totals + closure + provenance breakdown
-hgraph list --type tex --lean-status sorry --limit 20       # the next 20 to formalize
-hgraph list --tag flagship --sort chapter --json            # by document order, for a script
-hgraph list --match "central limit"                         # full-text over title+content
-hgraph list --generated manual                              # only hand-added nodes
-hgraph list --stale                                          # nodes whose source vanished
+## Sites and workspaces
+
+`hgraph serve` runs the React interface against live graph data, allowing
+reviews and comments to be written back to disk. `hgraph site` exports the same
+interface as static files; its review form can instead open a prefilled GitHub
+issue when the project config includes `repo: owner/name`.
+
+A project can customize its card and overview in `hgraph/config.yaml`:
+
+```yaml
+blueprint: blueprint/blueprint.tex
+lean: [Lean]
+site:
+  title: My project
+  subtitle: A one-line description
+  overview: overview.md
+  repo: owner/name
 ```
 
-**Walk the graph: what's proven, what's next.** `lean_status` is *local*; the
-CLI also closes over the hard-dependency DAG to tell you what's fully done
-and what's workable now:
+To combine projects, place a workspace `config.yaml` beside their directories:
 
-```bash
-hgraph frontier --type tex --limit 20 --json     # ranked "prove this next", for an agent
-hgraph list --state ready                         # same frontier, unranked
+```yaml
+title: My workspace
+overview: overview.md
+projects:
+  - name: Project A
+    root: a
+    category: Examples
+    blurb: A one-line description.
 ```
 
-A node is **closed** when it and its whole prerequisite closure are
-formalized; **ready** when every prerequisite is closed but it isn't yet
-(workable now); **blocked** when a prerequisite is still open;
-**formalized_open** when its own Lean is done but something upstream isn't.
+From that directory, `hgraph serve` and `hgraph site` discover the workspace
+automatically. Use `--manifest <file>` to select a different manifest and
+`--out <path>` to change the static output location.
 
-One edge per ordered pair — `add edge` onto an occupied pair is refused
-unless you pass `--replace`. A `label:`/`decl:`/`key:` reference matching
-several nodes is rejected as ambiguous rather than resolving arbitrarily.
-
-## The site
-
-There is no separate per-project "dashboard" artifact — one project or many,
-`hgraph site` is the only output, a single-page app that hash-routes
-client-side between the landing page (`#/`) and a project's statements
-(`#/<root>`):
-
-```bash
-hgraph site                        # writes _site/: index.html + assets/ + one <root>/data.json per project
-hgraph serve --port 8000           # the same app, live — review/comment write-back, no export step
-```
-
-Everything generated lands under `_site/` (override with `--out`), so it never
-mixes into your sources — and that directory *is* the deployable site.
-
-`site` writes a landing page — cards grouped under a heading per `category`
-if the manifest sets one, above an optional overview fragment (`.md` for a
-plain blurb; `.html` if you need custom boxes/diagrams — hgraph pipes it
-through unmodified either way) — plus each project's statements (Lean code,
-dependencies, reviews/comments) as its own `data.json`. This is the standard
-output **even for a single project**: with no `--manifest`, it looks for a
-workspace `config.yaml` and falls back to synthesizing a solo-project page
-from `hgraph/config.yaml`'s `site:` block (see Config below) — still a home
-page + overview + a click into the project, just one card.
-
-> [!NOTE]
-> `site` is a React/Vite frontend (`frontend/`), pre-built and shipped with
-> the package — `pip install hgraph` never requires Node.js. Python only
-> ever emits two JSON shapes (the landing data, and a project's statements +
-> Lean + deps + reviews); every bit of rendering — KaTeX math, the
-> interactive dependency graph, hover-previews, search, the bibliography,
-> the review form — happens client-side. See `frontend/README-DEV.md` if
-> you're changing the frontend itself.
-
-`serve` auto-detects a workspace the same way `site` does (a `config.yaml`
-next to the project directories, or `--manifest`): pointed at one project it
-serves that project alone (still with its own one-card landing page);
-pointed at a workspace root it serves the whole site — the landing data at
-`GET /api/site`, each project's at `GET /<root>/data.json`, both cached and
-rebuilt automatically whenever the underlying files change, so they never go
-stale. One process, one port, either way.
-
-**Reviewing.** Live (`hgraph serve`), the review form under a statement POSTs
-straight into the graph — exactly like `hgraph add review`. A **static**
-export (no server, e.g. GitHub Pages) instead offers "Suggest on GitHub": it
-builds a prefilled `github.com/<repo>/issues/new` link from the same
-Maths/Lean form and opens it in a new tab — no backend needed, just a `repo:
-owner/name` in the `site:` config block. Comment fields are capped
-client-side to stay well under the browser/GitHub URL length limit.
-
-## Config
-
-Two levels, both named `config.yaml`:
-
-- **Project** — `<project>/hgraph/config.yaml`: where `sync` finds the
-  sources, plus an optional `site:` block for a solo project's landing page.
-
-  ```yaml
-  blueprint: blueprint/blueprint.tex   # paths are relative to the project root
-  lean: [Lean]
-  site:
-    title: My project
-    subtitle: A one-line description
-    overview: overview.md              # optional, Markdown
-    repo: owner/name                   # optional — enables the GitHub-issue review link
-  ```
-
-- **Workspace** — a `config.yaml` next to several project directories, read
-  by a bare `hgraph site` with no `--manifest`:
-
-  ```yaml
-  title: My workspace
-  overview: overview.md              # optional, same .md/.html rule as above
-  projects:
-    - name: Project A
-      root: a                          # dir containing a/hgraph/
-      category: Group name             # optional — groups cards under a heading
-      blurb: One line about it.
-  ```
+The frontend is prebuilt into the Python package, so installing and using
+`hgraph` does not require Node.js. See
+[`frontend/README-DEV.md`](frontend/README-DEV.md) when developing the UI.
 
 ## Examples
 
-- [`examples/gauss/`](examples/gauss/) — the `sync` workflow end to end:
-  blueprint + Lean → graph, layer on provenance/comments/reviews by hand,
-  re-sync (idempotent). `bash examples/gauss/build.sh`
-- [`examples/triangular/`](examples/triangular/) — the rest of the schema:
-  every `content_type`, a wider `origin` spread, a stale-node demo, a
-  `related_to` edge, and the two-axis review shape.
-  `bash examples/triangular/build.sh`
+- [`examples/gauss/`](examples/gauss/) demonstrates the complete sync workflow:
+  blueprint and Lean sources, authored metadata, comments, reviews, and an
+  idempotent re-sync.
+- [`examples/triangular/`](examples/triangular/) covers the wider schema,
+  including content and provenance types, stale nodes, soft relationships, and
+  two-axis reviews.
 
-The repo's own [`config.yaml`](config.yaml) lists both as one grouped
-workspace (`hgraph site`, no `--manifest` needed) — that's what the live demo
-is. [`.github/workflows/pages.yml`](.github/workflows/pages.yml) builds and
-deploys it on every push to `main`.
+Run either example's `build.sh`, or run `hgraph site` at the repository root to
+build the combined site shown in the [live demo](https://axeldlv00.github.io/hgraph/).
 
 ## Status
 
-First working slice: storage, full CLI, queries, `sync` from a leanblueprint
-`.tex` + Lean sources, and the dashboard/site UI with live and static
-review flows. Next: richer authored-field auditing after `sync` (which
-nodes/fields have no source-of-truth to sync from).
+`hgraph` is beta software. The current release includes plain-file storage,
+sync, graph queries, frontier analysis, and live/static review interfaces. The
+next focus is richer auditing of authored fields after sync.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
+
+## Acknowledgments
+
+The node and edge storage format was inspired by
+[Astrolabe](https://arxiv.org/abs/2604.10435).

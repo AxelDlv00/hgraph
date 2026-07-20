@@ -122,6 +122,9 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
       const refEl = t.closest('.ref[data-id]') as HTMLElement | null;
       const leanEl = t.closest('.leanref[data-name]') as HTMLElement | null;
       const citeEl = t.closest('.cite[data-cite]') as HTMLElement | null;
+      // an overview/chapter-contents status square — a bare colour chip, so
+      // the preview is the only thing that says which statement it stands for
+      const cellEl = t.closest('.mm[data-id]') as HTMLElement | null;
       // a dependency-graph node — see GraphModal's post-render pass, which
       // tags every `g.node` with `data-nid` (a real entry id, or a
       // synthetic `ch<N>` for a collapsed chapter box — those don't preview)
@@ -145,6 +148,12 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
           const h = leanPreview(leanEl.dataset.name!);
           if (h) show(h, ev.clientX, ev.clientY);
         }, 110);
+      } else if (cellEl?.dataset.id) {
+        const id = cellEl.dataset.id;
+        showT.current = window.setTimeout(() => {
+          const h = stmtPreview(id);
+          if (h) show(h, ev.clientX, ev.clientY);
+        }, 110);
       } else if (graphNodeEl?.dataset.nid && !CHAPTER_ID_RE.test(graphNodeEl.dataset.nid)) {
         const nid = graphNodeEl.dataset.nid;
         showT.current = window.setTimeout(() => {
@@ -154,7 +163,7 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
       }
     }
     function onOut(ev: MouseEvent) {
-      if (!pinnedRef.current && (ev.target as HTMLElement).closest('.ref,.leanref,.cite,.node[data-nid]')) {
+      if (!pinnedRef.current && (ev.target as HTMLElement).closest('.ref,.leanref,.cite,.mm[data-id],.node[data-nid]')) {
         window.clearTimeout(showT.current);
         schedHide();
       }

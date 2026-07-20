@@ -7,9 +7,12 @@ function Squares({ stmts, onGoto, flat }: { stmts: StmtBlock[]; onGoto: (id: str
   return (
     <div className={`mmcells ov-statements${flat ? ' ov-flat' : ''}`}>
       {stmts.map((b) => (
+        // `data-id` is what HoverPreview delegates on — without it a square is
+        // an anonymous colour chip you have to click to identify
         <i
           key={b.id}
           className="mm"
+          data-id={b.id}
           style={{ background: statusColor(b.enrich?.lean_status) }}
           onClick={(e) => {
             e.preventDefault();
