@@ -31,7 +31,7 @@ from pathlib import Path
 
 import yaml
 
-from .graph import Graph, node_id
+from .graph import Graph, HGraphError, node_id
 
 
 def load_config(root: str | Path) -> dict:
@@ -83,6 +83,7 @@ _OPT_TITLE = r"\[((?:[^\[\]]|\[[^\[\]]*\])*)\]"
 LEAN_KINDS = {
     "theorem": "theorem", "lemma": "lemma", "def": "definition",
     "abbrev": "definition", "instance": "instance",
+    "structure": "structure", "class": "class", "inductive": "inductive",
 }
 # when several edges land on one ordered pair, the strongest type wins
 # (the hard `uses` edge subsumes the soft `formalizes` one); higher rank wins.
@@ -90,8 +91,11 @@ _EDGE_RANK = {"uses": 2, "formalizes": 1}
 _DECL_RE = re.compile(
     r"^\s*(?:@\[[^\]]*\]\s*)?"                      # optional attribute
     r"(?:private\s+|protected\s+|noncomputable\s+)*"
-    r"(theorem|lemma|def|abbrev|instance)\s+"
-    r"([A-Za-z0-9_'.]+)"
+    r"(theorem|lemma|def|abbrev|instance|structure|class|inductive)\s+"
+    # Lean identifiers may contain Unicode letters and symbols.  Stop at the
+    # punctuation that starts a declaration's binders/type/body instead of
+    # restricting the name to ASCII (e.g. `curvatureOperator_ιMulti`).
+    r"([^\s(:=]+)"
 )
 
 
@@ -369,7 +373,12 @@ def parse_lean(text: str) -> list[dict]:
         m = _DECL_RE.match(line)
         if m:
             kind, name = m.group(1), m.group(2)
-            decls.append((i, ".".join(ns + [name]), kind))
+            # `_root_.Foo` is explicitly outside the surrounding namespace;
+            # retaining the marker would create a name that Lean cannot refer
+            # to (`MorganTianLib._root_.Foo`).
+            fqname = name.removeprefix("_root_.") if name.startswith("_root_.") \
+                else ".".join(ns + [name])
+            decls.append((i, fqname, kind))
 
     # for each decl, find the top of a /-- … -/ doc comment sitting above it
     tops: list[int] = []
@@ -442,24 +451,53 @@ def _read_and_parse_lean(args: tuple[Path, Path]) -> tuple[str, list[dict]]:
 # the reconcile driver
 # --------------------------------------------------------------------------- #
 def _upsert(g: Graph, nid: str, *, title: str, type: str, content: str,
-            owned: dict) -> None:
+            owned: dict, dry_run: bool = False) -> bool:
     """Create the node, or overwrite exactly the owned fields — leaving every
     authored field (origin, tags, status, …) in place, clearing ``stale``, and
-    unsetting any owned field that is now empty (e.g. a doc comment removed)."""
+    unsetting any owned field that is now empty (e.g. a doc comment removed).
+
+    Return whether the graph differs from the requested state.  ``dry_run``
+    performs the same comparison without writing, which lets ``serve`` detect
+    pending sync work using the reconciliation rules themselves.
+    """
     clean = {k: v for k, v in owned.items() if v is not None}
     empty = [k for k, v in owned.items() if v is None]
     if g.has_node(nid):
-        g.modify_node(nid, title=title, type=type, content=content,
-                      set_meta=clean, unset=["stale", *empty])
+        n = g.get_node(nid)
+        changed = n.title != title or n.type != type or n.content != content
+        changed |= any(n.meta.get(k) != v for k, v in clean.items())
+        changed |= any(k in n.meta for k in ("stale", *empty))
+        if changed and not dry_run:
+            g.modify_node(nid, title=title, type=type, content=content,
+                          set_meta=clean, unset=["stale", *empty])
     else:
-        g.add_node(title, type=type, id=nid, content=content, **clean)
+        changed = True
+        if not dry_run:
+            g.add_node(title, type=type, id=nid, content=content, **clean)
+    return changed
 
 
 def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
-         root: str | Path = ".") -> dict:
+         root: str | Path = ".", dry_run: bool = False) -> dict:
+    """Reconcile configured sources into ``g``.
+
+    With ``dry_run=True`` all sources are parsed and the exact pending changes
+    are counted, but the graph is left untouched.  The returned ``changes``
+    count is zero precisely when a real sync would be a no-op.
+    """
     warnings: list[str] = []
     seen = {"blueprint": set(), "lean": set()}
     root_abs = Path(root).resolve()
+    lean_paths = tuple(lean_paths)
+
+    if blueprint and not Path(blueprint).is_file():
+        raise HGraphError(f"blueprint source not found: {blueprint}")
+    missing_lean = [str(p) for p in lean_paths if not Path(p).exists()]
+    if missing_lean:
+        raise HGraphError("Lean source path(s) not found: " + ", ".join(missing_lean))
+
+    node_changes = 0
+    edge_changes = 0
 
     # 1. Lean nodes (keyed by fully-qualified name) ------------------------- #
     # reading + regex-parsing each file is independent of every other file,
@@ -480,11 +518,13 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
             nid = node_id("lean", d["fqname"])
             lean_id[d["fqname"]] = nid
             lean_status[d["fqname"]] = "sorry" if d["sorry"] else "lean_ok"
-            _upsert(g, nid, title=d["fqname"], type="lean", content=d["body"],
-                    owned={"content_type": LEAN_KINDS.get(d["kind"], d["kind"]),
-                           "generated": "lean", "author": "sync", "decl": d["fqname"],
-                           "lean_status": lean_status[d["fqname"]],
-                           "file": rel, "docstring": d["doc"] or None})
+            node_changes += _upsert(
+                g, nid, title=d["fqname"], type="lean", content=d["body"],
+                owned={"content_type": LEAN_KINDS.get(d["kind"], d["kind"]),
+                       "generated": "lean", "author": "sync", "decl": d["fqname"],
+                       "lean_status": lean_status[d["fqname"]],
+                       "file": rel, "docstring": d["doc"] or None},
+                dry_run=dry_run)
             seen["lean"].add(nid)
 
     # 2. Blueprint nodes (keyed by \label) ---------------------------------- #
@@ -498,16 +538,18 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
 
         for i, s in enumerate(statements):
             status, mathlib_names = _tex_lean_status(s, lean_status)
-            _upsert(g, bp_id[s["label"]], title=s["title"], type="tex",
-                    content=s["body"],
-                    owned={"content_type": s["content_type"],
-                           "generated": "blueprint", "author": "sync",
-                           "label": s["label"], "chapter": s["chapter"],
-                           "order": i, "lean_status": status,
-                           "mathlib_name": mathlib_names or None,
-                           "group": s.get("group") or None,
-                           "level": s.get("level") or None,
-                           "ref": s.get("ref") or None})
+            node_changes += _upsert(
+                g, bp_id[s["label"]], title=s["title"], type="tex",
+                content=s["body"],
+                owned={"content_type": s["content_type"],
+                       "generated": "blueprint", "author": "sync",
+                       "label": s["label"], "chapter": s["chapter"],
+                       "order": i, "lean_status": status,
+                       "mathlib_name": mathlib_names or None,
+                       "group": s.get("group") or None,
+                       "level": s.get("level") or None,
+                       "ref": s.get("ref") or None},
+                dry_run=dry_run)
             seen["blueprint"].add(bp_id[s["label"]])
 
         # edges — every endpoint is derivable, so no lookup table is needed
@@ -552,18 +594,24 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
                 authored.add((e.source, e.target))
         for pair, e in existing.items():
             if pair not in pair_type:            # vanished from the sources
-                g.delete_edge(e.id)
+                edge_changes += 1
+                if not dry_run:
+                    g.delete_edge(e.id)
         for (s, t), ty in pair_type.items():
             if (s, t) in authored:
                 warnings.append(f"edge {s}→{t}: authored edge present, kept over generated {ty}")
                 continue
             old = existing.get((s, t))
             if old is None:
-                g.add_edge(s, t, ty, generated="blueprint")
+                edge_changes += 1
+                if not dry_run:
+                    g.add_edge(s, t, ty, generated="blueprint")
             elif old.type != ty:
                 # type changed — rewrite, carrying authored extras through
-                extra = {k: v for k, v in old.attrs.items() if k != "generated"}
-                g.add_edge(s, t, ty, replace=True, generated="blueprint", **extra)
+                edge_changes += 1
+                if not dry_run:
+                    extra = {k: v for k, v in old.attrs.items() if k != "generated"}
+                    g.add_edge(s, t, ty, replace=True, generated="blueprint", **extra)
             made += 1
 
     # 4. mark vanished generated nodes stale (never delete) — only within the
@@ -575,8 +623,79 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
         synced = (gen == "blueprint" and bool(blueprint)) or \
                  (gen == "lean" and bool(lean_paths))
         if synced and n.id not in seen[gen] and not n.meta.get("stale"):
-            g.modify_node(n.id, set_meta={"stale": True})
+            if not dry_run:
+                g.modify_node(n.id, set_meta={"stale": True})
             stale += 1
 
     return {"blueprint": len(seen["blueprint"]), "lean": len(seen["lean"]),
-            "edges": made, "stale": stale, "warnings": warnings}
+            "edges": made, "stale": stale, "warnings": warnings,
+            "node_changes": node_changes, "edge_changes": edge_changes,
+            "changes": node_changes + edge_changes + stale}
+
+
+def sync_from_config(root: str | Path, *, dry_run: bool = False) -> dict:
+    """Sync one project using its ``hgraph/config.yaml`` source settings."""
+    cfg = load_config(root)
+    if not cfg["blueprint"] and not cfg["lean"]:
+        raise HGraphError(
+            f"no blueprint or Lean sources configured in {Path(root) / 'hgraph/config.yaml'}")
+    return sync(Graph.open(root), blueprint=cfg["blueprint"], lean_paths=cfg["lean"],
+                root=root, dry_run=dry_run)
+
+
+def project_sync_status(root: str | Path) -> dict:
+    """Describe whether one project's generated graph matches its sources.
+
+    Hand-authored graphs need no sync and are reported as ``manual``.  Missing,
+    empty, unconfigured generated, and invalid projects are kept distinct so a
+    workspace ``serve`` warning can tell the user what needs attention.
+    """
+    root = Path(root)
+    graph_dir = root / "hgraph"
+    if not graph_dir.is_dir():
+        return {"state": "missing", "message": "no hgraph/ directory"}
+
+    try:
+        nodes = list(Graph.open(root).nodes())
+    except Exception as e:
+        return {"state": "error", "message": str(e)}
+
+    try:
+        cfg = load_config(root)
+    except Exception as e:
+        return {"state": "error", "message": str(e)}
+    if not cfg["blueprint"] and not cfg["lean"]:
+        if any(n.meta.get("generated") in ("blueprint", "lean") for n in nodes):
+            return {"state": "unconfigured",
+                    "message": "generated nodes exist, but no sync sources are configured"}
+        if not nodes:
+            return {"state": "empty", "message": "the graph has no nodes"}
+        return {"state": "manual", "message": "authored graph (no sync configured)"}
+
+    try:
+        result = sync(Graph.open(root), blueprint=cfg["blueprint"],
+                      lean_paths=cfg["lean"], root=root, dry_run=True)
+    except Exception as e:
+        return {"state": "error", "message": str(e)}
+    return {
+        "state": "out_of_sync" if result["changes"] else "in_sync",
+        "message": (f"{result['changes']} generated graph change(s) pending"
+                    if result["changes"] else "generated graph is current"),
+        "result": result,
+    }
+
+
+def workspace_sync_status(manifest: dict, base: str | Path) -> list[dict]:
+    """Return :func:`project_sync_status` for every project in a manifest."""
+    projects = manifest.get("projects") if isinstance(manifest, dict) else None
+    if not isinstance(projects, list):
+        raise HGraphError("workspace manifest needs a projects: list")
+    out = []
+    for project in projects:
+        if not isinstance(project, dict) or project.get("root") is None:
+            raise HGraphError("each workspace project needs a root:")
+        root = Path(base) / str(project["root"])
+        out.append({"name": project.get("name") or str(project["root"]),
+                    "root": str(project["root"]),
+                    **project_sync_status(root)})
+    return out

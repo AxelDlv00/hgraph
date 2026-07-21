@@ -66,7 +66,7 @@ a {
   font: 700 clamp(28px, 4vw, 40px) / 1.2 var(--serif);
   color: var(--heading);
   margin: 0 0 14px;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 .hero .subtitle {
   color: var(--muted);
@@ -304,7 +304,7 @@ a {
   font-size: 17px;
   margin: 0;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: var(--heading);
 }
 .project-htop .sub { color: var(--muted); font-size: 13px; }
@@ -345,9 +345,10 @@ a {
 .stmt-card {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-left: 3px solid var(--empty);
+  border-radius: 11px;
   box-shadow: var(--shadow);
-  padding: 22px 24px;
+  padding: 16px;
   scroll-margin-top: 24px;
 }
 .stmt-head {
@@ -372,7 +373,14 @@ a {
 }
 .stmt-badges {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
 }
+.stmt-blueprint-btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--muted); font: 600 11.5px var(--sans); cursor: pointer; }
+.stmt-blueprint-btn:hover { border-color: var(--accent); color: var(--accent); }
 .stmt-body {
   font-size: 14.5px;
   line-height: 1.7;
@@ -581,7 +589,7 @@ a {
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
-.gm-bar h2 { font-size: 15px; margin: 0 6px 0 0; font-weight: 700; letter-spacing: -0.01em; color: var(--heading); }
+.gm-bar h2 { font-size: 15px; margin: 0 6px 0 0; font-weight: 700; letter-spacing: 0; color: var(--heading); }
 .gm-bar .sp { margin-left: auto; }
 .gm-body { display: flex; flex: 1; min-height: 0; }
 .gm-wrap { position: relative; flex: 1; min-width: 0; overflow: hidden; }
@@ -591,7 +599,7 @@ a {
   width: min(470px, 40vw);
   flex: none;
   border-left: 1px solid var(--line);
-  background: var(--panel);
+  background: var(--bg);
   overflow-y: auto;
   overflow-x: hidden;
   overflow-wrap: break-word; /* long titles/labels wrap rather than clip */
@@ -603,7 +611,20 @@ a {
 #gm-side.empty { width: 0; border-left: none; padding: 0; }
 #gm-side.empty .gp-close { display: none; }
 @media (max-width: 860px) {
-  #gm-side { display: none; }
+  .gm-body { position: relative; }
+  #gm-side {
+    position: absolute;
+    inset: auto 0 0;
+    z-index: 6;
+    display: flex;
+    width: 100%;
+    max-height: min(58vh, 520px);
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    box-shadow: 0 -10px 30px rgba(20, 25, 35, 0.14);
+    padding: 12px;
+  }
+  #gm-side.empty { display: none; }
 }
 .gp-empty { color: var(--muted); font-size: 13px; padding: 20px 16px; }
 .gp-close {
@@ -633,9 +654,9 @@ a {
 .gm-float { position: absolute; background: rgba(255, 255, 255, 0.93); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); font-size: 12px; }
 .gm-legend { left: 14px; bottom: 14px; padding: 11px 13px; display: flex; flex-direction: column; gap: 4px; max-height: calc(100vh - 160px); overflow: auto; z-index: 3; }
 .gm-legend .lg { display: flex; align-items: center; gap: 8px; color: var(--heading); font-size: 11.5px; }
-.gm-legend .lgttl { font-size: 12px; color: var(--heading); font-weight: 700; margin-bottom: 4px; max-width: 230px; line-height: 1.3; cursor: pointer; user-select: none; }
-.gm-legend .lgcar { float: right; color: var(--muted); transition: transform 0.15s; }
-.gm-legend .lgsub { font-weight: 400; color: var(--muted); font-size: 11px; }
+.gm-legend .lgttl { display: grid; grid-template-columns: 1fr auto; align-items: center; width: 100%; padding: 0; border: 0; background: transparent; color: var(--heading); font: 700 12px/1.3 var(--sans); text-align: left; cursor: pointer; user-select: none; }
+.gm-legend .lgcar { color: var(--muted); transition: transform 0.15s; }
+.gm-legend .lgsub { grid-column: 1 / -1; font-weight: 400; color: var(--muted); font-size: 11px; }
 .gm-legend.collapsed { max-height: none; }
 .gm-legend.collapsed > *:not(.lgttl) { display: none; }
 .gm-legend.collapsed .lgsub { display: none; }
@@ -753,7 +774,7 @@ a {
 .tsec:hover { background: var(--bg); color: var(--accent); }
 .tchev, .tchev-sp { width: 12px; display: inline-block; font-size: 10px; color: var(--muted); }
 
-main.doc-main h2.ch { font-size: 25px; font-weight: 750; letter-spacing: -0.02em; margin: 16px 0 6px; color: var(--heading); }
+main.doc-main h2.ch { font-size: 25px; font-weight: 750; letter-spacing: 0; margin: 16px 0 6px; color: var(--heading); }
 main.doc-main h3 { font-size: 19px; margin: 30px 0 8px; font-weight: 660; color: var(--heading); }
 main.doc-main h4 { font-size: 15.5px; margin: 22px 0 6px; color: #374151; font-weight: 680; }
 .hn { color: var(--muted); font-weight: 600; margin-right: 0.4em; font-variant-numeric: tabular-nums; }
@@ -767,12 +788,14 @@ li.li-lbl { list-style: none; margin-left: -1.15em; }
 blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--line); color: var(--heading); }
 
 .choverview { background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 10px 14px; margin: 12px 0 22px; }
-.choverview summary { cursor: pointer; font-size: 13px; color: var(--muted); }
-.co-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.choverview > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .co-sec { font-size: 12px; color: var(--heading); min-width: 140px; }
 .co-sec .n { color: var(--muted); margin-right: 4px; }
-.co-rowmap { display: flex; flex-wrap: wrap; gap: 3px; }
-.mm { width: 12px; height: 12px; border-radius: 3px; cursor: pointer; }
+.co-intro { color: var(--muted); }
+.co-link { border: 0; padding: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.co-link:hover { color: var(--accent); text-decoration: underline; }
+.co-link:focus-visible, .ov-link:focus-visible, .mm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mm { display: block; flex: none; width: 12px; height: 12px; padding: 0; border: 0; border-radius: 3px; cursor: pointer; }
 /* the squares sit 3px apart, so hovering one needs to say plainly *which* one
    the preview popup is describing */
 .mm[data-id]:hover { outline: 2px solid var(--heading); outline-offset: 1px; }
@@ -780,7 +803,7 @@ blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--
 /* ==== Overview drill-down page: title page + status legend + progressively
    disclosed chapter -> section -> subsection squares ==== */
 .maketitle { text-align: center; padding: 22px 0 20px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
-.maketitle h1 { font-size: 30px; font-weight: 750; letter-spacing: -0.02em; margin: 0 0 9px; line-height: 1.22; color: var(--heading); }
+.maketitle h1 { font-size: 30px; font-weight: 750; letter-spacing: 0; margin: 0 0 9px; line-height: 1.22; color: var(--heading); }
 .mkauthor { font-size: 15px; color: var(--muted); }
 .ovleg-wrap { margin-bottom: 6px; }
 .ovleg { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; margin: 14px 0 18px; align-items: center; }
@@ -797,7 +820,8 @@ blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--
 .ov-chapter[open] > summary::before { content: "▾"; }
 .ov-chapter > summary:hover .ov-chh { color: var(--accent); }
 .ov-sections { padding: 2px 16px 12px 34px; display: flex; flex-direction: column; gap: 1px; }
-.ov-chh { font-size: 15.5px; font-weight: 650; color: var(--heading); cursor: pointer; letter-spacing: -0.01em; flex: 0 0 auto; max-width: 100%; }
+.ov-chh { font-size: 15.5px; font-weight: 650; color: var(--heading); cursor: pointer; letter-spacing: 0; flex: 0 0 auto; max-width: 100%; }
+.ov-link { display: inline-flex; align-items: baseline; border: 0; padding: 0; background: transparent; font-family: inherit; text-align: left; }
 .ov-chapter > summary .ov-flat, .ov-section > summary .ov-flat { width: 100%; margin-top: 2px; }
 .ov-chapter[open] > summary .ov-flat, .ov-section[open] > summary .ov-flat { display: none; }
 .ov-section { margin: 0; }
@@ -822,14 +846,14 @@ blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--
   box-shadow: var(--shadow);
   scroll-margin-top: 16px;
 }
-.stmt.k-definition { border-left-color: #0b5fd0; }
-.stmt.k-theorem { border-left-color: #7c3aed; }
-.stmt.k-lemma { border-left-color: #0d9488; }
-.stmt.k-proposition { border-left-color: #b45309; }
-.stmt.k-corollary { border-left-color: #db2777; }
-.stmt.k-remark { border-left-color: #6b7280; }
-.stmt.k-example { border-left-color: #0891b2; }
-.stmt.k-conjecture { border-left-color: #9333ea; }
+.stmt.k-definition, .stmt-card.k-definition { border-left-color: #0b5fd0; }
+.stmt.k-theorem, .stmt-card.k-theorem { border-left-color: #7c3aed; }
+.stmt.k-lemma, .stmt-card.k-lemma { border-left-color: #0d9488; }
+.stmt.k-proposition, .stmt-card.k-proposition { border-left-color: #b45309; }
+.stmt.k-corollary, .stmt-card.k-corollary { border-left-color: #db2777; }
+.stmt.k-remark, .stmt-card.k-remark { border-left-color: #6b7280; }
+.stmt.k-example, .stmt-card.k-example { border-left-color: #0891b2; }
+.stmt.k-conjecture, .stmt-card.k-conjecture { border-left-color: #9333ea; }
 .stmt.sel { box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
 
 /* a block that hasn't hydrated yet (ChapterView streams a chapter in
@@ -857,6 +881,7 @@ blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--
 .tag.k-remark { background: #eef0f3; color: #6b7280; }
 .tag.k-example { background: #dcf5fb; color: #0891b2; }
 .tag.k-conjecture { background: #f3e8ff; color: #9333ea; }
+.stmt-card .stmt-kind { cursor: default; text-transform: none; letter-spacing: 0; }
 .st { font-style: italic; color: #374151; }
 .badges { margin-left: auto; display: flex; gap: 5px; flex-wrap: wrap; }
 .b { font-size: 11px; padding: 2px 8px; border-radius: 7px; font-weight: 600; white-space: nowrap; }
@@ -873,6 +898,10 @@ blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--
 .mtag.pop:hover { border-color: var(--accent); color: var(--heading); }
 .mtag.lean { background: var(--lean-bg); color: var(--lean); }
 .mtag.mathlib { background: var(--mathlib-bg); color: var(--mathlib); }
+.mtag.graph-open { display: inline-flex; align-items: center; gap: 5px; border-color: var(--line); font-family: inherit; cursor: pointer; }
+.mtag.graph-open:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.entry-graph-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.entry-graph-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 /* The review panel rides in the statement's meta row. It is a <details>, not a
    plain tag: closed, its summary is styled to read as one more chip beside
@@ -1022,10 +1051,10 @@ pre.lean { background: #f8f9fb; border: 1px solid var(--line); border-radius: 8p
 /* ==== summary + bibliography views ==== */
 .sumgrid { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 24px; }
 .sumcard { flex: 1; min-width: 104px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 12px 14px; box-shadow: var(--shadow); }
-.sumcard .v { font-size: 24px; font-weight: 750; letter-spacing: -0.02em; }
+.sumcard .v { font-size: 24px; font-weight: 750; letter-spacing: 0; }
 .sumcard .l { font-size: 12.5px; font-weight: 600; margin-top: 2px; }
 .sumcard .s { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
-.sumsec { font-size: 15px; font-weight: 700; margin: 28px 0 6px; letter-spacing: -0.01em; }
+.sumsec { font-size: 15px; font-weight: 700; margin: 28px 0 6px; letter-spacing: 0; }
 .stmt.sum { margin: 8px 0; padding: 10px 14px; cursor: pointer; box-shadow: none; }
 .stmt.sum:hover { border-color: var(--accent); }
 .stmt.sum .rmeta { margin-top: 7px; }

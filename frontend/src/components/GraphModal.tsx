@@ -49,6 +49,7 @@ export function GraphModal({
   root,
   selectedId,
   onSelect,
+  onOpenBlueprint,
   onClose,
   usedByMap,
   byId,
@@ -57,6 +58,7 @@ export function GraphModal({
   root: string;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  onOpenBlueprint: (id: string) => void;
   onClose: () => void;
   usedByMap: Map<string, Dep[]>;
   byId: Map<string, Entry>;
@@ -548,6 +550,7 @@ export function GraphModal({
                 refs={data.refs}
                 cites={cites}
                 onNavigate={onSelect}
+                onOpenBlueprint={onOpenBlueprint}
               />
             </>
           ) : (

@@ -4,6 +4,7 @@ import { Math as Tex } from './Tex';
 import { StatusBadge } from './StatusBadge';
 import { Reviews } from './Reviews';
 import { localDepGraph } from '../depgraph';
+import { BookOpen } from 'lucide-react';
 
 const ABBR: Record<string, string> = {
   definition: 'Def', lemma: 'Lem', theorem: 'Thm', proposition: 'Prop',
@@ -48,6 +49,7 @@ export function StatementCard({
   refs,
   cites,
   onNavigate,
+  onOpenBlueprint,
 }: {
   entry: Entry;
   usedBy: Dep[];
@@ -60,17 +62,30 @@ export function StatementCard({
   cites?: CiteNums;
   /** clicking a \ref link in the body selects that statement */
   onNavigate?: (id: string) => void;
+  /** leave the graph and reveal this declaration in the blueprint document */
+  onOpenBlueprint?: (id: string) => void;
 }) {
   const ups = entry.deps.map((d) => byId.get(d.id)).filter((x): x is Entry => !!x);
   const downs = usedBy.map((d) => byId.get(d.id)).filter((x): x is Entry => !!x);
 
   return (
-    <div className="stmt-card" id={`stmt-${entry.id}`}>
+    <div className={`stmt-card k-${entry.kind}`} id={`stmt-${entry.id}`}>
       <div className="stmt-head">
-        <span className="stmt-kind">{ABBR[entry.kind] || entry.kind}</span>
-        <Tex as="span" className="stmt-title" text={entry.title || entry.label || entry.id} macros={macros} refs={refs} cites={cites} />
+        <span className={`stmt-kind tag k-${entry.kind}`}>{ABBR[entry.kind] || entry.kind}</span>
+        <Tex as="span" className="stmt-title st" text={entry.title || entry.label || entry.id} macros={macros} refs={refs} cites={cites} />
         <span className="stmt-badges">
           <StatusBadge status={entry.lean_status} />
+          {onOpenBlueprint && (
+            <button
+              type="button"
+              className="stmt-blueprint-btn"
+              onClick={() => onOpenBlueprint(entry.id)}
+              title="Open this declaration in the blueprint"
+            >
+              <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
+              Open in blueprint
+            </button>
+          )}
         </span>
       </div>
 

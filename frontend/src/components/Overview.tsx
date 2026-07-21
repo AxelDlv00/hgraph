@@ -1,77 +1,8 @@
-import type { Chapter, StmtBlock } from '../types';
-import { chapterTree, type TreeSection } from '../chapterTree';
+import type { Chapter, RefEntry } from '../types';
+import { chapterTree } from '../chapterTree';
 import { Math as Tex } from './Tex';
-import { STATUS, statusColor, type Status } from '../palette';
-
-function Squares({ stmts, onGoto, flat }: { stmts: StmtBlock[]; onGoto: (id: string) => void; flat?: boolean }) {
-  return (
-    <div className={`mmcells ov-statements${flat ? ' ov-flat' : ''}`}>
-      {stmts.map((b) => (
-        // `data-id` is what HoverPreview delegates on — without it a square is
-        // an anonymous colour chip you have to click to identify
-        <i
-          key={b.id}
-          className="mm"
-          data-id={b.id}
-          style={{ background: statusColor(b.enrich?.lean_status) }}
-          onClick={(e) => {
-            e.preventDefault();
-            if (b.id) onGoto(b.id);
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function SecLabel({ num, title }: { num: string; title: string }) {
-  return num ? (
-    <div className="co-sec">
-      <span className="n">{num}</span>
-      <Tex as="span" text={title} />
-    </div>
-  ) : (
-    <span className="co-sec" style={{ color: 'var(--muted)' }}>
-      Introduction
-    </span>
-  );
-}
-
-function SectionRow({ s, onGoto }: { s: TreeSection; onGoto: (id: string) => void }) {
-  const secStmts = s.stmts.concat(s.subs.flatMap((u) => u.stmts));
-  if (!s.subs.length) {
-    return (
-      <div className="ov-section-h">
-        <SecLabel num={s.num} title={s.title} />
-        <Squares stmts={secStmts} onGoto={onGoto} />
-      </div>
-    );
-  }
-  return (
-    <details className="ov-section">
-      <summary>
-        <SecLabel num={s.num} title={s.title} />
-        <Squares stmts={secStmts} onGoto={onGoto} flat />
-      </summary>
-      <div className="ov-subsections">
-        {s.stmts.length > 0 && (
-          <div className="ov-subsection">
-            <span className="co-sec" style={{ color: 'var(--muted)' }}>
-              Direct
-            </span>
-            <Squares stmts={s.stmts} onGoto={onGoto} />
-          </div>
-        )}
-        {s.subs.map((u) => (
-          <div className="ov-subsection" key={u.num}>
-            <SecLabel num={u.num} title={u.title} />
-            <Squares stmts={u.stmts} onGoto={onGoto} />
-          </div>
-        ))}
-      </div>
-    </details>
-  );
-}
+import { STATUS, type Status } from '../palette';
+import { ChapterContentsTree, StatementSquares } from './ChapterContents';
 
 /** The "Overview" landing page for a multi-chapter blueprint — a title page
  * (`\maketitle`) + a status-color legend + every chapter, progressively
@@ -84,12 +15,18 @@ export function Overview({
   docTitle,
   docAuthor,
   chapters,
+  refs,
   onGoto,
+  onGotoChapter,
+  onGotoSection,
 }: {
   docTitle?: string;
   docAuthor?: string;
   chapters: Chapter[];
+  refs?: Record<string, RefEntry>;
   onGoto: (id: string) => void;
+  onGotoChapter: (chapterIndex: number) => void;
+  onGotoSection: (chapterIndex: number, num: string) => void;
 }) {
   const rows = chapters
     .map((ch, i) => {
@@ -126,17 +63,27 @@ export function Overview({
       {rows.map(({ ch, i, secs, chStmts }) => (
         <details className="ov-chapter" key={i}>
           <summary>
-            <div className="ov-chh">
+            <button
+              type="button"
+              className="ov-chh ov-link"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onGotoChapter(i);
+              }}
+              title={`Open chapter ${ch.num}: ${ch.title}`}
+            >
               <span className="hn">{ch.num}</span>
-              <Tex as="span" text={ch.title} />
-            </div>
-            <Squares stmts={chStmts} onGoto={onGoto} flat />
+              <Tex as="span" text={ch.title} refs={refs} />
+            </button>
+            <StatementSquares stmts={chStmts} onGoto={onGoto} flat />
           </summary>
-          <div className="ov-sections">
-            {secs.map((s, si) => (
-              <SectionRow key={si} s={s} onGoto={onGoto} />
-            ))}
-          </div>
+          <ChapterContentsTree
+            sections={secs}
+            refs={refs}
+            onGotoStatement={onGoto}
+            onGotoSection={(num) => onGotoSection(i, num)}
+          />
         </details>
       ))}
     </div>

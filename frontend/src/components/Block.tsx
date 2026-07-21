@@ -19,6 +19,7 @@ export const BlockView = memo(function BlockView({
   selected,
   onSelect,
   onNavigate,
+  onOpenGraph,
   onCite,
   root,
   repo,
@@ -35,6 +36,7 @@ export const BlockView = memo(function BlockView({
   selected: boolean;
   onSelect: (id: string) => void;
   onNavigate: (id: string) => void;
+  onOpenGraph: (id: string) => void;
   onCite?: (key: string) => void;
   /** passed through to a statement's review panel (see StmtBox) */
   root: string;
@@ -63,6 +65,7 @@ export const BlockView = memo(function BlockView({
         selected={selected}
         onSelect={onSelect}
         onNavigate={onNavigate}
+        onOpenGraph={onOpenGraph}
         onCite={onCite}
         root={root}
         repo={repo}

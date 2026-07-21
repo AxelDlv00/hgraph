@@ -11,6 +11,7 @@ import { Summary } from './Summary';
 import { Bibliography } from './Bibliography';
 import { citeNums, plainTex } from '../latex';
 import { setDefaultMacros } from '../typeset';
+import { Network } from 'lucide-react';
 
 // how many search results render at once — past this, a broad query (one
 // letter, or a bare status chip on a large blueprint) would typeset hundreds
@@ -136,6 +137,17 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     const e = data?.entries.find((x) => x.id === id);
     setHash(e?.label || id);
   }, [data, chapters, curCh, setHash]);
+
+  const openInGraph = useCallback((id: string) => {
+    setGraphSelectedId(id);
+    setGraphOpen(true);
+  }, []);
+
+  const openInBlueprint = useCallback((id: string) => {
+    setGraphOpen(false);
+    setGraphSelectedId(null);
+    navigate(id);
+  }, [navigate]);
 
   function gotoSection(chapterIndex: number, num: string) {
     setView('doc');
@@ -285,6 +297,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
           root={root}
           selectedId={graphSelectedId}
           onSelect={setGraphSelectedId}
+          onOpenBlueprint={openInBlueprint}
           onClose={() => setGraphOpen(false)}
           usedByMap={usedByMap}
           byId={byId}
@@ -356,6 +369,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
                   selected={selectedId === b.id}
                   onSelect={navigate}
                   onNavigate={navigate}
+                  onOpenGraph={openInGraph}
                   onCite={onCite}
                   root={root}
                   repo={data.repo}
@@ -368,7 +382,15 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
               )}
             </div>
           ) : view === 'overview' && chapters.length > 0 ? (
-            <Overview docTitle={data.docTitle} docAuthor={data.docAuthor} chapters={chapters} onGoto={navigate} />
+            <Overview
+              docTitle={data.docTitle}
+              docAuthor={data.docAuthor}
+              chapters={chapters}
+              refs={refs}
+              onGoto={navigate}
+              onGotoChapter={gotoChapter}
+              onGotoSection={gotoSection}
+            />
           ) : chapters.length > 0 ? (
             <ChapterView
               key={curCh} /* fresh progressive-hydration state per chapter */
@@ -380,13 +402,15 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
               selectedId={selectedId}
               onSelect={navigate}
               onNavigate={navigate}
+              onGotoSection={(num) => gotoSection(curCh, num)}
+              onOpenGraph={openInGraph}
               onCite={onCite}
               anchor={anchor}
               root={root}
               repo={data.repo}
             />
           ) : (
-            <FlatList data={data} onSelect={navigate} />
+            <FlatList data={data} onSelect={navigate} onOpenGraph={openInGraph} />
           )}
         </main>
 
@@ -396,7 +420,15 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
   );
 }
 
-function FlatList({ data, onSelect }: { data: ProjectData; onSelect: (id: string) => void }) {
+function FlatList({
+  data,
+  onSelect,
+  onOpenGraph,
+}: {
+  data: ProjectData;
+  onSelect: (id: string) => void;
+  onOpenGraph: (id: string) => void;
+}) {
   return (
     <div className="doc">
       <h2 className="ch">{data.title}</h2>
@@ -407,6 +439,18 @@ function FlatList({ data, onSelect }: { data: ProjectData; onSelect: (id: string
             <span className="st">{e.title}</span>
             <span className="badges">
               <span className={`b b-${e.lean_status}`}>{e.lean_status.replace('_', ' ')}</span>
+              <button
+                type="button"
+                className="entry-graph-btn"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenGraph(e.id);
+                }}
+                title="Open this declaration in the dependency graph"
+                aria-label="Open in graph"
+              >
+                <Network size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
             </span>
           </div>
           <div className="sbody">{e.body}</div>

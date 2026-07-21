@@ -10,13 +10,17 @@
     hgraph ancestors clt-lean --names
     hgraph view union            # or: tex | lean   (add --dot for Graphviz)
 
-Runs against ``./hgraph`` by default; override with ``--root <project-dir>``.
+Most commands run against ``./hgraph`` by default; ``sync``, ``site``, and
+``serve`` also discover a workspace manifest at ``./config.yaml``. Override
+the project directory with ``--root <project-dir>``.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -104,6 +108,125 @@ def _filter_nodes(g: Graph, args) -> list:
     }[args.sort]
     out.sort(key=keyf)
     return out
+
+
+def _count(value: int, singular: str, plural: str | None = None) -> str:
+    return f"{value:,} {singular if value == 1 else (plural or singular + 's')}"
+
+
+def _sync_line(result: dict) -> str:
+    """Compact result shared by solo and workspace sync output."""
+    parts = [
+        _count(result["blueprint"], "blueprint node"),
+        _count(result["lean"], "Lean declaration"),
+        _count(result["edges"], "generated edge"),
+    ]
+    if result["stale"]:
+        parts.append(_count(result["stale"], "node marked stale", "nodes marked stale"))
+    return " | ".join(parts)
+
+
+class _SyncStyle:
+    """Small ANSI formatter with an opt-out for redirected/CI output."""
+
+    _codes = {"green": "32", "yellow": "33", "red": "31", "bold": "1"}
+
+    def __init__(self, mode: str = "auto", stream=None):
+        stream = stream or sys.stdout
+        is_tty = bool(getattr(stream, "isatty", lambda: False)())
+        self.enabled = (mode == "always" or
+                        (mode == "auto" and is_tty and
+                         "NO_COLOR" not in os.environ and os.environ.get("TERM") != "dumb"))
+
+    def __call__(self, text: str, color: str) -> str:
+        if not self.enabled:
+            return text
+        return f"\033[{self._codes[color]}m{text}\033[0m"
+
+    def green(self, text: str) -> str:
+        return self(text, "green")
+
+    def yellow(self, text: str) -> str:
+        return self(text, "yellow")
+
+    def red(self, text: str) -> str:
+        return self(text, "red")
+
+    def bold(self, text: str) -> str:
+        return self(text, "bold")
+
+
+_WARNING_LABELS = {
+    "lean": "Lean references not found in scanned sources",
+    "dependency": "blueprint dependencies not found",
+    "edge": "generated edge conflicts",
+    "other": "other sync warnings",
+}
+
+
+def _warning_kind(warning: str) -> str:
+    if r"\lean{" in warning and warning.endswith("not found in Lean sources"):
+        return "lean"
+    if "has no blueprint node" in warning:
+        return "dependency"
+    if warning.startswith("edge ") and "authored edge present" in warning:
+        return "edge"
+    return "other"
+
+
+def _render_warning_summary(warnings: list[str], *, stream, style: _SyncStyle,
+                            indent: str = "  ", verbose: bool = False,
+                            lean_count: int | None = None) -> int:
+    """Render warning categories without losing the full warning list.
+
+    Sync can legitimately produce hundreds of unresolved references when a
+    project has only a blueprint or relies on external libraries. Three sample
+    lines per category keep the normal report useful; ``--verbose`` expands it.
+    """
+    groups: dict[str, list[str]] = {}
+    for warning in warnings:
+        groups.setdefault(_warning_kind(warning), []).append(warning)
+    for kind, rows in groups.items():
+        label = _WARNING_LABELS[kind]
+        if kind == "lean" and lean_count == 0:
+            label += " (no Lean declarations scanned)"
+        print(f"{indent}{style.yellow('[warning]')} {len(rows):,} {label}",
+              file=stream)
+        shown = rows if verbose else rows[:3]
+        for warning in shown:
+            print(f"{indent}  - {warning}", file=stream)
+        if len(rows) > len(shown):
+            print(f"{indent}  ... {len(rows) - len(shown):,} more; use --verbose to show all",
+                  file=stream)
+    return len(warnings)
+
+
+def _warn_sync_preflight(statuses: list[dict], *, command: str,
+                         verbose: bool = False) -> None:
+    """Print actionable source/graph inconsistencies found before ``serve``."""
+    problem_states = {"out_of_sync", "missing", "empty", "unconfigured", "error"}
+    problems = [s for s in statuses if s["state"] in problem_states]
+    has_source_warnings = any(s.get("result", {}).get("warnings") for s in statuses)
+    if not problems and not has_source_warnings:
+        return
+
+    style = _SyncStyle(stream=sys.stderr)
+    print(style.yellow("warning: some project data may be incomplete or out of sync:"),
+          file=sys.stderr)
+    for s in problems:
+        marker = style.red("[error]") if s["state"] == "error" else style.yellow("[check]")
+        print(f"  {marker} {s['name']} ({s['root']}): {s['message']}", file=sys.stderr)
+    for s in statuses:
+        warnings = s.get("result", {}).get("warnings", [])
+        if not warnings:
+            continue
+        print(f"  {s['name']} ({s['root']}):", file=sys.stderr)
+        _render_warning_summary(
+            warnings, stream=sys.stderr, style=style, indent="    ", verbose=verbose,
+            lean_count=s.get("result", {}).get("lean"))
+    needs_fix = has_source_warnings or any(s["state"] != "out_of_sync" for s in problems)
+    action = ("fix the source/configuration errors, then run" if needs_fix else "run")
+    print(f"  {action} `{command}` before serving.", file=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -231,10 +354,35 @@ def build_parser() -> argparse.ArgumentParser:
     vw.add_argument("--dot", action="store_true", help="emit Graphviz DOT")
 
     sy = sub.add_parser(
-        "sync", help="parse a blueprint/Lean source and (re)generate nodes+edges")
+        "sync", help="sync one project, or every project in a workspace manifest")
     sy.add_argument("--blueprint", help="path to the leanblueprint .tex")
     sy.add_argument("--lean", action="append", default=[], metavar="PATH",
                     help="a .lean file or a directory of them (repeatable)")
+    sy.add_argument("--manifest", help="sync every project in this workspace manifest; "
+                    "default: auto-detect ./config.yaml when no source flags are given")
+    sy.add_argument("-v", "--verbose", action="store_true",
+                    help="show every source warning (default: three examples per category)")
+    sy.add_argument("--color", choices=["auto", "always", "never"], default="auto",
+                    help="color status output (default: auto; respects NO_COLOR)")
+
+    review = sub.add_parser(
+        "review", help="share local reviews/comments with collaborators through GitHub"
+    ).add_subparsers(dest="what", required=True)
+    send = review.add_parser(
+        "send", help="open one issue containing feedback absent from the GitHub baseline")
+    send.add_argument("--repo", help="GitHub owner/name (default: site.repo or current gh repo)")
+    send.add_argument("--base", metavar="BRANCH",
+                      help="remote branch to compare with (default: repository default branch)")
+    send.add_argument("--title", help="override the generated issue title")
+    send.add_argument("--label", action="append", default=[], metavar="NAME",
+                      help="label to add to the issue (repeatable; label must already exist)")
+    kinds = send.add_mutually_exclusive_group()
+    kinds.add_argument("--reviews-only", action="store_true",
+                       help="send review attachments, excluding freeform comments")
+    kinds.add_argument("--comments-only", action="store_true",
+                       help="send freeform comments, excluding reviews")
+    send.add_argument("--dry-run", action="store_true",
+                      help="print the issue and comment bodies without creating anything")
 
     st = sub.add_parser("site", help="write a landing index.html (multi-project from a "
                         "manifest, or a solo project's own hgraph/config.yaml)")
@@ -256,6 +404,8 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--macros", help="a .sty/.tex preamble to lift KaTeX macros from")
     sv.add_argument("--repo", help="owner/name — shown alongside the live review form "
                     "(default: hgraph/config.yaml's site.repo)")
+    sv.add_argument("-v", "--verbose", action="store_true",
+                    help="show every sync warning before serving")
     sv.add_argument("--manifest", help="serve a whole workspace (see `hgraph site`) instead "
                     "of one project; default: auto-detect ./config.yaml")
 
@@ -422,9 +572,61 @@ def main(argv=None) -> int:
             print(view_dot(g, args.kind) if args.dot else view_text(g, args.kind))
 
         elif args.cmd == "sync":
-            from .sync import sync, load_config
+            from .site import looks_like_manifest
+            from .sync import load_config, sync, sync_from_config
             blueprint, lean = args.blueprint, list(args.lean)
-            if not blueprint and not lean:          # fall back to config
+            root = Path(args.root)
+            auto_manifest = root / "config.yaml"
+            manifest_path = Path(args.manifest) if args.manifest else auto_manifest
+            workspace = (not blueprint and not lean and
+                         (bool(args.manifest) or
+                          (auto_manifest.exists() and looks_like_manifest(auto_manifest))))
+
+            if args.manifest and (blueprint or lean):
+                print("error: --manifest cannot be combined with --blueprint or --lean",
+                      file=sys.stderr)
+                return 2
+
+            if workspace:
+                if not manifest_path.exists() or not looks_like_manifest(manifest_path):
+                    raise HGraphError(f"not an hgraph workspace manifest: {manifest_path}")
+                manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+                projects = manifest["projects"]
+                failures = 0
+                synced = 0
+                skipped = 0
+                warning_total = 0
+                style = _SyncStyle(args.color, sys.stdout)
+                print(style.bold(f"Syncing {_count(len(projects), 'workspace project')} "
+                                 f"from {manifest_path}"), flush=True)
+                for project in projects:
+                    name = project.get("name") or str(project["root"])
+                    proot = manifest_path.parent / str(project["root"])
+                    try:
+                        cfg = load_config(proot)
+                        if not cfg["blueprint"] and not cfg["lean"]:
+                            skipped += 1
+                            print(f"  {style.yellow('[skipped]')} {name}: no blueprint/Lean "
+                                  f"sources in {proot / 'hgraph/config.yaml'}", flush=True)
+                            continue
+                        result = sync_from_config(proot)
+                    except Exception as e:
+                        failures += 1
+                        print(f"  {style.red('[failed]')} {name}: {e}", flush=True)
+                        continue
+                    synced += 1
+                    print(f"  {style.green('[synced]')} {name}: {_sync_line(result)}",
+                          flush=True)
+                    warning_total += _render_warning_summary(
+                        result["warnings"], stream=sys.stdout, style=style, indent="    ",
+                        verbose=args.verbose, lean_count=result["lean"])
+                summary = (f"Workspace sync complete: {synced:,} synced, {skipped:,} skipped, "
+                           f"{failures:,} failed, {_count(warning_total, 'warning')}")
+                summary_style = style.red if failures else style.yellow if warning_total else style.green
+                print(summary_style(summary), flush=True)
+                return 1 if failures else 0
+
+            if not blueprint and not lean:          # fall back to project config
                 cfg = load_config(args.root)
                 blueprint, lean = cfg["blueprint"], cfg["lean"]
             if not blueprint and not lean:
@@ -435,11 +637,35 @@ def main(argv=None) -> int:
                       file=sys.stderr)
                 return 2
             r = sync(g, blueprint=blueprint, lean_paths=lean, root=args.root)
-            print(f"synced: {r['blueprint']} blueprint node(s), "
-                  f"{r['lean']} lean node(s), {r['edges']} generated edge(s)"
-                  + (f", {r['stale']} marked stale" if r['stale'] else ""))
-            for w in r["warnings"]:
-                print(f"  warning: {w}", file=sys.stderr)
+            style = _SyncStyle(args.color, sys.stdout)
+            print(f"{style.green('[synced]')} {_sync_line(r)}")
+            _render_warning_summary(r["warnings"], stream=sys.stdout, style=style,
+                                    verbose=args.verbose, lean_count=r["lean"])
+
+        elif args.cmd == "review" and args.what == "send":
+            from .collaboration import send_review_batch
+            kinds = ({"review"} if args.reviews_only else
+                     {"comment"} if args.comments_only else
+                     {"review", "comment"})
+            result = send_review_batch(
+                args.root, repo=args.repo, base=args.base, kinds=kinds,
+                title=args.title, labels=args.label, dry_run=args.dry_run)
+            pending = result["pending"]
+            if not pending:
+                print(f"No local reviews/comments differ from "
+                      f"{result['repo']}@{result['branch']}.")
+            elif args.dry_run:
+                print(f"Would send {len(pending)} attachment(s) to "
+                      f"{result['repo']}@{result['branch']}:\n")
+                print(f"ISSUE TITLE\n{result['title']}\n\nISSUE BODY\n{result['body']}")
+                for index, comment in enumerate(result["comments"], 1):
+                    print(f"\nISSUE COMMENT {index}/{len(pending)}\n{comment}")
+            else:
+                reviews = sum(a.kind == "review" for a in pending)
+                comments = sum(a.kind == "comment" for a in pending)
+                print(f"Created {result['issue']}")
+                print(f"  posted {_count(reviews, 'review')} and "
+                      f"{_count(comments, 'comment')} as separate issue comments")
 
         elif args.cmd == "site":
             from .site import looks_like_manifest, write_from_manifest, write_solo
@@ -471,13 +697,24 @@ def main(argv=None) -> int:
 
         elif args.cmd == "serve":
             from .site import looks_like_manifest
+            from .sync import load_config, project_sync_status, workspace_sync_status
             root = Path(args.root)
             workspace = Path(args.manifest) if args.manifest else (root / "config.yaml")
             # same rule as `site`: a ./config.yaml belonging to another tool is
             # not a workspace — fall through and serve the solo project
             if args.manifest or (workspace.exists() and looks_like_manifest(workspace)):
                 from .server import serve_workspace
+                if not workspace.exists() or not looks_like_manifest(workspace):
+                    raise HGraphError(f"not an hgraph workspace manifest: {workspace}")
                 manifest = yaml.safe_load(workspace.read_text(encoding="utf-8")) or {}
+                command = (f"hgraph sync --manifest {shlex.quote(str(workspace))}"
+                           if args.manifest
+                           else (f"hgraph --root {shlex.quote(str(root))} sync"
+                                 if str(root) != "."
+                                 else "hgraph sync"))
+                _warn_sync_preflight(
+                    workspace_sync_status(manifest, workspace.parent), command=command,
+                    verbose=args.verbose)
                 serve_workspace(manifest, workspace.parent, host=args.host, port=args.port)
             elif not (root / "hgraph").is_dir():
                 # Neither a workspace nor a project. `Graph.open` is happy to
@@ -495,10 +732,21 @@ def main(argv=None) -> int:
                 return 2
             else:
                 from .server import serve
+                command = (f"hgraph --root {shlex.quote(str(root))} sync"
+                           if str(root) != "." else "hgraph sync")
+                status = project_sync_status(root)
+                try:
+                    project_name = (load_config(args.root).get("site", {}).get("title")
+                                    or root.name)
+                except Exception:
+                    project_name = root.name
+                _warn_sync_preflight([
+                    {"name": project_name, "root": str(root), **status}
+                ], command=command, verbose=args.verbose)
                 serve(g, host=args.host, port=args.port, title=args.title,
                       macros_from=args.macros, root=args.root, repo=args.repo)
 
-    except HGraphError as e:
+    except (HGraphError, OSError, yaml.YAMLError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     return 0

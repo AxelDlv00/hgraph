@@ -2,38 +2,25 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import type { Block as BlockT, Chapter, RefEntry, StmtBlock } from '../types';
 import { BlockView } from './Block';
 import { Math as Tex } from './Tex';
-import { statusColor } from '../palette';
 import { plainTex } from '../latex';
 import type { CiteNums } from '../latex';
+import { chapterTree } from '../chapterTree';
+import { ChapterContentsTree } from './ChapterContents';
 
-interface Section {
-  num: string;
-  title: string;
-  stmts: StmtBlock[];
-}
-
-function chapterSections(ch: Chapter): Section[] {
-  const rows: Section[] = [];
-  let cur: Section | null = null;
-  for (const b of ch.blocks) {
-    if (b.t === 'head' && b.level >= 2 && b.level <= 3 && b.num) {
-      cur = { num: b.num, title: b.title, stmts: [] };
-      rows.push(cur);
-    } else if (b.t === 'stmt') {
-      if (!cur) {
-        cur = { num: '', title: '', stmts: [] };
-        rows.push(cur);
-      }
-      cur.stmts.push(b);
-    }
-  }
-  return rows;
-}
-
-function ChapterOverview({ ch, refs, onGoto }: { ch: Chapter; refs: Record<string, RefEntry>; onGoto: (id: string) => void }) {
+function ChapterOverview({
+  ch,
+  refs,
+  onGoto,
+  onGotoSection,
+}: {
+  ch: Chapter;
+  refs: Record<string, RefEntry>;
+  onGoto: (id: string) => void;
+  onGotoSection: (num: string) => void;
+}) {
   const stmts = ch.blocks.filter((b): b is StmtBlock => b.t === 'stmt');
-  const rows = chapterSections(ch);
-  if (!stmts.length && !rows.length) return null;
+  const sections = chapterTree(ch);
+  if (!stmts.length && !sections.length) return null;
   const cc: Record<string, number> = { mathlib_ok: 0, lean_ok: 0, sorry: 0, empty: 0 };
   stmts.forEach((b) => {
     const s = b.enrich ? b.enrich.lean_status : 'empty';
@@ -45,35 +32,12 @@ function ChapterOverview({ ch, refs, onGoto }: { ch: Chapter; refs: Record<strin
       <summary>
         Chapter contents · <b>{stmts.length}</b> statements · <b>{pct}%</b> formalized
       </summary>
-      {rows.map((r, i) => (
-        <div className="co-row" key={i}>
-          {r.num ? (
-            <div className="co-sec">
-              <span className="n">{r.num}</span>
-              <Tex as="span" text={r.title} refs={refs} />
-            </div>
-          ) : (
-            <span className="co-sec" style={{ color: 'var(--muted)' }}>
-              Introduction
-            </span>
-          )}
-          <div className="co-rowmap">
-            {r.stmts.map((b) => {
-              const st = b.enrich ? b.enrich.lean_status : 'empty';
-              return (
-                // `data-id`: hovering previews the statement (see HoverPreview)
-                <i
-                  key={b.id}
-                  className="mm"
-                  data-id={b.id}
-                  style={{ background: statusColor(st) }}
-                  onClick={() => b.id && onGoto(b.id)}
-                />
-              );
-            })}
-          </div>
-        </div>
-      ))}
+      <ChapterContentsTree
+        sections={sections}
+        refs={refs}
+        onGotoStatement={onGoto}
+        onGotoSection={onGotoSection}
+      />
     </details>
   );
 }
@@ -123,6 +87,8 @@ export function ChapterView({
   selectedId,
   onSelect,
   onNavigate,
+  onGotoSection,
+  onOpenGraph,
   onCite,
   anchor,
   root,
@@ -136,6 +102,8 @@ export function ChapterView({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNavigate: (id: string) => void;
+  onGotoSection: (num: string) => void;
+  onOpenGraph: (id: string) => void;
   onCite?: (key: string) => void;
   /** element id a pending scroll wants to land on (see ProjectView.navigate) */
   anchor?: string | null;
@@ -181,7 +149,12 @@ export function ChapterView({
         {chapter.num && <span className="hn">{chapter.num}</span>}
         <Tex as="span" text={chapter.title} refs={refs} />
       </h2>
-      <ChapterOverview ch={chapter} refs={refs} onGoto={onNavigate} />
+      <ChapterOverview
+        ch={chapter}
+        refs={refs}
+        onGoto={onNavigate}
+        onGotoSection={onGotoSection}
+      />
       {blocks.slice(0, mounted).map((b, i) => (
         <BlockView
           key={i}
@@ -194,6 +167,7 @@ export function ChapterView({
           selected={b.t === 'stmt' && !!b.id && b.id === selectedId}
           onSelect={onSelect}
           onNavigate={onNavigate}
+          onOpenGraph={onOpenGraph}
           onCite={onCite}
           root={root}
           repo={repo}

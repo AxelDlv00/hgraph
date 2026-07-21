@@ -66,7 +66,8 @@ blueprint: blueprint/blueprint.tex
 lean: [Lean]
 ```
 
-Then a bare `hgraph sync` is enough.
+Then a bare `hgraph sync` is enough. At a workspace root, the same command
+auto-detects `config.yaml` and syncs every configured project in the manifest.
 
 > [!IMPORTANT]
 > Use the installed `hgraph` command inside a project, not `python -m hgraph`.
@@ -133,7 +134,7 @@ different project. Query and listing commands support `--json`; use
 
 | Command | Purpose |
 | --- | --- |
-| `hgraph sync` | Update derived graph data from the blueprint and Lean sources |
+| `hgraph sync` | Update one project's graph, or every configured project in a workspace |
 | `hgraph stats` | Summarize nodes, statuses, provenance, and graph closure |
 | `hgraph list` | Filter nodes by type, status, tags, text, source, or state |
 | `hgraph get <ref>` | Show a node with its content, links, dependencies, and notes |
@@ -142,6 +143,7 @@ different project. Query and listing commands support `--json`; use
 | `hgraph descendants <ref>` | Traverse reverse dependencies |
 | `hgraph view tex\|lean\|union` | Render one graph view, optionally as Graphviz DOT |
 | `hgraph add …` | Add a node, edge, comment, or review |
+| `hgraph review send` | Share local reviews/comments in a structured GitHub issue |
 | `hgraph modify node …` | Update authored node metadata |
 | `hgraph delete …` | Delete authored graph data |
 | `hgraph serve` | Run the live site with review and comment write-back |
@@ -161,6 +163,36 @@ hgraph ancestors label:gauss_sum --names
 An ambiguous human-readable reference is rejected rather than guessed. Adding
 an edge to an occupied source/target pair is also rejected unless `--replace`
 is explicit.
+
+## Sharing reviews
+
+`hgraph review send` publishes feedback for collaboration without requiring
+the attachment files to be committed first. It compares every local
+`review-*.md` and `comment-*.md` with the same path on the GitHub repository's
+default branch, using the file's Git blob hash. New and locally modified files
+are included; identical upstream files are omitted.
+
+The command requires an authenticated [GitHub CLI](https://cli.github.com/).
+The repository comes from `site.repo` in `hgraph/config.yaml`, or from the
+current Git remote as understood by `gh`. A batch creates one issue containing
+the project and baseline metadata, then one issue comment per attachment with
+its target label, declaration type, source metadata, author, timestamp,
+verdicts, and text.
+
+```bash
+gh auth login
+hgraph review send --dry-run
+hgraph review send --label review
+
+# Narrow or override the comparison when needed
+hgraph review send --reviews-only
+hgraph review send --comments-only --repo owner/repository --base main
+```
+
+`--dry-run` prints the complete issue and comment templates without writing to
+GitHub. Feedback continues to compare as pending until its attachment file is
+present on the selected upstream branch, so rerunning the send command before
+the feedback is merged can publish it again.
 
 ## Sites and workspaces
 
@@ -193,9 +225,24 @@ projects:
     blurb: A one-line description.
 ```
 
-From that directory, `hgraph serve` and `hgraph site` discover the workspace
-automatically. Use `--manifest <file>` to select a different manifest and
-`--out <path>` to change the static output location.
+From that directory, `hgraph sync`, `hgraph serve`, and `hgraph site` discover
+the workspace automatically. A workspace sync continues across projects and
+reports each result separately. Before serving, `hgraph` checks each configured
+project without writing and warns when generated graph data does not match its
+sources, with the exact sync command to run.
+
+Sync warnings are grouped by category and show at most three examples by
+default, so a project with hundreds of unresolved Lean references does not
+bury actual failures. Pass `hgraph sync --verbose` to show every warning.
+The same cap applies to the `serve` preflight; use `hgraph serve --verbose` to
+expand it there.
+Status colors are enabled automatically on terminals; `--color always|never`
+overrides detection, and the standard `NO_COLOR` environment variable is
+respected.
+
+Use `hgraph sync --manifest <file>` (and the corresponding `--manifest` option
+on `serve` or `site`) to select a different manifest. Use `--out <path>` to
+change the static output location.
 
 The frontend is prebuilt into the Python package, so installing and using
 `hgraph` does not require Node.js. See

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { GRAPH } from '../palette';
+import { ChevronDown } from 'lucide-react';
 
 /**
  * The graph modal's floating legend — ported from the original's
@@ -11,13 +12,19 @@ import { GRAPH } from '../palette';
  * style — no edge legend needed.
  */
 export function GraphLegend({ mode }: { mode: 'groups' | 'full' }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   return (
     <div className={`gm-float gm-legend${collapsed ? ' collapsed' : ''}`}>
-      <div className="lgttl" onClick={() => setCollapsed((c) => !c)}>
-        Legend <span className="lgcar">▾</span>
-        <div className="lgsub">shape, border &amp; fill</div>
-      </div>
+      <button
+        type="button"
+        className="lgttl"
+        onClick={() => setCollapsed((c) => !c)}
+        aria-expanded={!collapsed}
+      >
+        <span>Legend</span>
+        <ChevronDown className="lgcar" size={15} strokeWidth={2} aria-hidden="true" />
+        <span className="lgsub">shape, border &amp; fill</span>
+      </button>
 
       <div className="lgsec">Chapters</div>
       <div className="lg">

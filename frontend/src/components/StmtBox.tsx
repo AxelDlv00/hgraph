@@ -2,6 +2,7 @@ import type { StmtBlock, RefEntry, Dep } from '../types';
 import type { CiteNums } from '../latex';
 import { Math as Tex } from './Tex';
 import { Reviews } from './Reviews';
+import { Network } from 'lucide-react';
 
 const ABBR: Record<string, string> = {
   definition: 'Def', lemma: 'Lem', theorem: 'Thm', proposition: 'Prop',
@@ -24,6 +25,7 @@ export function StmtBox({
   selected,
   onSelect,
   onNavigate,
+  onOpenGraph,
   onCite,
   root,
   repo,
@@ -36,6 +38,7 @@ export function StmtBox({
   selected: boolean;
   onSelect: (id: string) => void;
   onNavigate: (id: string) => void;
+  onOpenGraph: (id: string) => void;
   onCite?: (key: string) => void;
   /** review target + write path — the meta row offers a review inline, so a
    *  reader never has to open the graph to file one */
@@ -69,6 +72,15 @@ export function StmtBox({
       <Tex as="div" className="sbody" text={b.body} macros={macros} refs={refs} cites={cites} onNavigate={onNavigate} onCite={onCite} />
       {b.id && (
         <div className="smeta">
+          <button
+            type="button"
+            className="mtag graph-open"
+            onClick={() => onOpenGraph(b.id!)}
+            title="Open this declaration in the dependency graph"
+          >
+            <Network size={13} strokeWidth={2} aria-hidden="true" />
+            Open in graph
+          </button>
           <span className="mtag pop" data-graph={b.id}>
             uses {usesCount} · used by {usedByCount}
           </span>
