@@ -11,8 +11,14 @@ export function esc(s?: string | null): string {
 
 export interface RefEntry {
   num: string;
+  /** the graph node id, for a statement — the only ref kind with one */
   id: string | null;
   abbr: string;
+  kind?: 'stmt' | 'sec' | 'chap' | 'eq';
+  /** chapter index, so a ref into another chapter can switch to it */
+  ch?: number;
+  /** element id to scroll to within that chapter ("" = the chapter's top) */
+  anchor?: string;
 }
 
 /** bib key -> its 1-based position in the bibliography, so `\cite{foo}` can
@@ -26,16 +32,24 @@ export function citeNums(bib?: { key: string }[] | null): CiteNums {
   return out;
 }
 
-/** `\ref{a,b}` / `\cref{a,b}` -> numbered links (or a plain xref span if unresolved). */
-export function xref(labels: string, refs: Record<string, RefEntry>): string {
+/** `\ref{a,b}` / `\cref{a,b}` / `\eqref{a}` -> numbered links (or a plain xref
+ * span if unresolved). Statements link by node id; chapters, sections and
+ * equations have no node, so they link by "<chapter index>:<element id>" and
+ * the click handler scrolls there instead (see ProjectView's navigate).
+ * `bare` is `\eqref`'s form: the number alone, parenthesised as LaTeX does. */
+export function xref(labels: string, refs: Record<string, RefEntry>, bare = false): string {
   return labels
     .split(',')
     .map((l) => {
       l = l.trim();
       const r = refs[l];
-      if (r && r.id) return `<a class="ref" data-id="${r.id}">${r.abbr}&nbsp;${r.num}</a>`;
-      if (r) return `<span class="ref" style="color:var(--muted);cursor:default">${r.abbr}&nbsp;${r.num}</span>`;
-      return `<span class="xref">${esc(l.replace(/^[a-z]+:/, ''))}</span>`;
+      if (!r) return `<span class="xref">${esc(l.replace(/^[a-z]+:/, ''))}</span>`;
+      const num = r.kind === 'eq' ? `(${r.num})` : r.num;
+      const text = bare ? num : `${esc(r.abbr)}&nbsp;${num}`;
+      if (r.id) return `<a class="ref" data-id="${r.id}">${text}</a>`;
+      if (r.ch !== undefined && r.anchor !== undefined)
+        return `<a class="ref" data-loc="${r.ch}:${esc(r.anchor)}">${text}</a>`;
+      return `<span class="ref" style="color:var(--muted);cursor:default">${text}</span>`;
     })
     .join(', ');
 }
@@ -47,17 +61,23 @@ function imRules(refs: Record<string, RefEntry>, cites: CiteNums): [RegExp, stri
     [/\\paragraph\{([^{}]*)\}/g, '<b>$1.</b> '],
     [/\\(?:sub)*section\*?\{([^{}]*)\}/g, '<strong>$1</strong> '],
     [/\\(?:emph|textit|textsl|textsc)\{([^{}]*)\}/g, '<em>$1</em>'],
-    [/\\textbf\{([^{}]*)\}/g, '<strong>$1</strong>'],
-    [/\{\\(?:bfseries|bf)(?![a-zA-Z])\s*([^{}]*)\}/g, '<strong>$1</strong>'],
+    [/\\textbf\{([^{}]*)\}/g, '<strong class="tex-bold">$1</strong>'],
+    [/\{\\(?:bfseries|bf)(?![a-zA-Z])\s*([^{}]*)\}/g, '<strong class="tex-bold">$1</strong>'],
     [/\{\\(?:itshape|slshape|emph|em|it|sl)(?![a-zA-Z])\s*([^{}]*)\}/g, '<em>$1</em>'],
     [/\{\\(?:ttfamily|tt)(?![a-zA-Z])\s*([^{}]*)\}/g, '<code>$1</code>'],
     [/\{\\(?:normalfont|rmfamily|sffamily|scshape|rm|sf|sc)(?![a-zA-Z])\s*([^{}]*)\}/g, '$1'],
     [/\\(?:texttt|verb|lstinline)\{([^{}]*)\}/g, '<code>$1</code>'],
-    [/\\href\{([^{}]*)\}\{([^{}]*)\}/g, '<a href="$1" target="_blank" rel="noopener">$2</a>'],
-    [/\\url\{([^{}]*)\}/g, '<a href="$1" target="_blank" rel="noopener">$1</a>'],
+    [/\\href\{([^{}]*)\}\{([^{}]*)\}/g,
+      (_m: string, href: string, label: string) => `<a class="tex-link" href="${attrValue(href)}" target="_blank" rel="noopener">${label}</a>`],
+    [/\\url\{([^{}]*)\}/g,
+      (_m: string, href: string) => `<a class="tex-link tex-url" href="${attrValue(href)}" target="_blank" rel="noopener">${href.replace(/-/g, '&#45;')}</a>`],
     [/\\texorpdfstring\{([^{}]*)\}\{[^{}]*\}/g, '$1'],
-    [/\\[cC]ref\{([^{}]*)\}/g, (_m: string, a: string) => xref(a, refs)],
-    [/\\(?:eq)?ref\{([^{}]*)\}/g, (_m: string, a: string) => xref(a, refs)],
+    // cleveref's \cref/\Cref/\crefrange and plain \ref all render as "<name> <num>";
+    // \eqref is the one that shows the bare number, in parentheses
+    [/\\[cC]ref(?:range)?\{([^{}]*)\}(?:\{([^{}]*)\})?/g,
+      (_m: string, a: string, b?: string) => xref(b ? `${a},${b}` : a, refs)],
+    [/\\eqref\{([^{}]*)\}/g, (_m: string, a: string) => xref(a, refs, true)],
+    [/\\ref\{([^{}]*)\}/g, (_m: string, a: string) => xref(a, refs)],
     [
       /\\cite[a-zA-Z]*\*?(?:\[[^\]]*\])?\{([^{}]*)\}/g,
       (_m: string, a: string) =>
@@ -91,12 +111,31 @@ const ACCENTS: Record<string, string> = {
   '=': '̄', '.': '̇', v: '̌', u: '̆', c: '̧', H: '̋', r: '̊',
 };
 
+/** Apply TeX's prose ligatures to visible text without rewriting attributes
+ * inside the HTML emitted by `inlineMacros` (notably `--` inside a URL). */
+function texTypography(s: string): string {
+  return s
+    .split(/(<(?:[^>"']|"[^"]*"|'[^']*')*>)/g)
+    .map((part) =>
+      part.startsWith('<')
+        ? part
+        : part.replace(/``/g, '“').replace(/''/g, '”').replace(/---/g, '—').replace(/--/g, '–'),
+    )
+    .join('');
+}
+
+/** The source has already gone through `esc`, so only quote characters need
+ * escaping here. Keeping this separate avoids double-encoding URL ampersands. */
+function attrValue(s: string): string {
+  return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function detexRest(s: string): string {
   s = s.replace(
     /\\(['`^"~=.]|[vucHr](?![A-Za-z]))(?:\s*\{([A-Za-z])\}|([A-Za-z]))/g,
     (_m, a, br, ba) => ((br || ba || '') + ACCENTS[a]).normalize('NFC'),
   );
-  s = s.replace(/``/g, '“').replace(/''/g, '”').replace(/---/g, '—').replace(/ -- /g, ' – ');
+  s = texTypography(s);
   s = s.replace(
     /\\(?:noindent|indent|par|smallskip|medskip|bigskip|vfill|hfill|newpage|clearpage|pagebreak|nopagebreak|linebreak|centering|raggedright|raggedleft|samepage|sloppy|protect|leavevmode|frenchspacing|allowbreak|maketitle|bfseries|itshape|normalfont|scshape|ttfamily|footnotesize|small|large|Large|normalsize)\b\s*/g,
     '',
@@ -114,7 +153,7 @@ function detexRest(s: string): string {
   s = s.replace(/\\(?:label|hspace\*?|vspace\*?|phantom|hphantom|vphantom|vskip|hskip|setlength|index|footnotemark)\{[^{}]*\}/g, '');
   s = s
     .replace(/\\(?:dcref|group|level|lean|uses|proves|label|source)\{[^{}]*\}/g, '')
-    .replace(/\\(?:leanok|notready|mathlibok)\b/g, '');
+    .replace(/\\(?:leanok|notready|mathlibok|sketch)\b/g, '');
   s = s.replace(/\\footnote\{([^{}]*)\}/g, ' ($1)');
   s = s.replace(/\\begin\{quote\}/g, '<blockquote>').replace(/\\end\{quote\}/g, '</blockquote>');
   const envLbl = (_m: string, e: string) => `<em class="env-lbl">${e.charAt(0).toUpperCase() + e.slice(1)}.</em> `;
@@ -146,6 +185,15 @@ function detexRest(s: string): string {
 function mathEnvs(s: string): string {
   const strip = (b: string) =>
     b.replace(/\\label\{[^{}]*\}/g, '').replace(/\\(?:notag|nonumber)\b/g, '').replace(/(\\begin\{array\})\s*\[[a-zA-Z]\]/g, '$1');
+  // Each numbered equation carries its number as a `\tag{…}` the backend wrote
+  // in (see dashboard._number_equations) — KaTeX draws it where LaTeX would.
+  // Mirror every tag as an empty anchor just before the display so `\cref{eq:…}`
+  // has somewhere to scroll to; the sentinel survives esc() and becomes HTML at
+  // the end of detex().
+  const anchors = (b: string) =>
+    (b.match(/\\tag\*?\{([\w.]+)\}/g) || [])
+      .map((t) => `@@EQ${t.replace(/^\\tag\*?\{|\}$/g, '')}QE@@`)
+      .join('');
   const M: string[] = [];
   const prot = (x: string) =>
     x.replace(/(\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$\$[\s\S]*?\$\$|\$[^$]*?\$)/g, (m) => {
@@ -153,14 +201,15 @@ function mathEnvs(s: string): string {
       return '@@KE' + (M.length - 1) + 'EK@@';
     });
   s = prot(s);
-  s = s.replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_m, b) => `\\[${strip(b)}\\]`);
+  s = s.replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_m, b) => `${anchors(b)}\\[${strip(b)}\\]`);
   s = s.replace(
     /\\begin\{(eqnarray\*?|align\*?|alignat\*?|flalign\*?|gather\*?|multline\*?)\}([\s\S]*?)\\end\{\1\}/g,
     (_m, env, b) => {
       const inner = /^gather/.test(env) ? 'gathered' : 'aligned';
+      const a = anchors(b);
       if (/^eqnarray/.test(env)) b = b.replace(/&\s*([^&\n]*?)\s*&/g, '&$1');
       else if (/^alignat/.test(env)) b = b.replace(/^\s*\{?\d+\}?/, '');
-      return `\\[\\begin{${inner}}${strip(b)}\\end{${inner}}\\]`;
+      return `${a}\\[\\begin{${inner}}${strip(b)}\\end{${inner}}\\]`;
     },
   );
   s = prot(s);
@@ -189,7 +238,10 @@ export function detex(
     return '@@KX' + (math.length - 1) + 'XK@@';
   });
   s = detexRest(inlineMacros(s, refs, cites));
-  return s.replace(/@@KX(\d+)XK@@/g, (_m, i) => math[+i]).replace(/@@KDOLLARK@@/g, '&#36;');
+  return s
+    .replace(/@@KX(\d+)XK@@/g, (_m, i) => math[+i])
+    .replace(/@@KDOLLARK@@/g, '&#36;')
+    .replace(/@@EQ(.*?)QE@@/g, (_m, n) => `<span class="eqa" id="eq-${n}"></span>`);
 }
 
 export function proseHtml(

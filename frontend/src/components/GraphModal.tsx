@@ -34,7 +34,7 @@ function statusPasses(e: Entry, statusFilter: ReadonlySet<string>, q: string): b
  * one — in a Web Worker (see vizInstance.ts), cached per DOT string, and
  * prefetched per chapter in idle time, so opening a chapter is usually
  * instant and never freezes the page. The all-collapsed starting state uses
- * the build-time-precomputed SVG (`data.gvsvg.groups`) when present, exactly
+ * the build-time-precomputed SVG (`data.gvsvg.overview`) when present, exactly
  * as the original's `gmPreSvg` did — and falls back to a live layout of the
  * same overview when the build had no `dot` binary.
  *
@@ -71,7 +71,7 @@ export function GraphModal({
   const [lvlMax, setLvlMax] = useState(2);
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
-  const [svg, setSvg] = useState<string | null>(data.gvsvg?.groups || null);
+  const [svg, setSvg] = useState<string | null>(data.gvsvg?.overview || null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chapterPick, setChapterPick] = useState('');
@@ -205,8 +205,8 @@ export function GraphModal({
   useEffect(() => {
     let cancelled = false;
     setLoadError(null);
-    if (expanded.size === 0 && data.gvsvg?.groups) {
-      setSvg(data.gvsvg.groups);
+    if (expanded.size === 0 && data.gvsvg?.overview) {
+      setSvg(data.gvsvg.overview);
       setLoading(false);
       return;
     }
@@ -246,7 +246,7 @@ export function GraphModal({
   useEffect(() => {
     if (!model.nodes.length) return;
     const dots: string[] = [];
-    if (!data.gvsvg?.groups) dots.push(dotMixed(model, new Set<number>(), lvlMax));
+    if (!data.gvsvg?.overview) dots.push(dotMixed(model, new Set<number>(), lvlMax));
     for (const c of model.chapters) if (c.count) dots.push(dotMixed(model, new Set<number>([c.key]), lvlMax));
     prefetchLayouts(dots);
   }, [model, lvlMax, data.gvsvg]);
@@ -522,7 +522,7 @@ export function GraphModal({
           <div className="gm-float gm-count">
             <b>{countText}</b>
           </div>
-          {svg && <GraphLegend mode={expanded.size === 0 ? 'groups' : 'full'} />}
+          {svg && <GraphLegend mode={expanded.size === 0 ? 'collapsed' : 'full'} />}
           <div className="gm-float gm-hint">
             {hint}
             {loadError && (

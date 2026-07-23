@@ -109,13 +109,14 @@ export function buildGraphModel(data: ProjectData): GraphModel {
   });
   const chapters: Chapter[] = data.chapters || [];
   // "Chapter 3 · Curvature" — the word is worth the width: a bare "3 Curvature"
-  // reads as part of the title. Groups (the non-chapter unit) have no number
-  // and stay as-is.
+  // reads as part of the title. A node whose chapter is a raw string (not an
+  // index into `chapters`) has no number and stays as-is.
   const chLabel = (k: number | string): string => {
     if (typeof k === 'number' && chapters[k]) {
       const title = plainTex(chapters[k].title);
       const num = chapters[k].num;
-      return num ? `Chapter ${num} · ${title}` : title;
+      const word = chapters[k].appendix ? 'Appendix' : 'Chapter';
+      return num ? `${word} ${num} · ${title}` : title;
     }
     return plainTex(String(k)).slice(0, 30);
   };

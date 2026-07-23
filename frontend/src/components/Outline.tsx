@@ -12,7 +12,7 @@ export function Outline({
 }) {
   if (!chapter) {
     return (
-      <aside className="doc-outline">
+      <aside className="doc-outline" id="blueprint-outline" aria-label="Chapter outline">
         <div className="olh">Outline</div>
         <div className="oempty">The chapter outline appears while reading the blueprint.</div>
       </aside>
@@ -20,7 +20,7 @@ export function Outline({
   }
   const stmts = chapter.blocks.filter((b): b is StmtBlock => b.t === 'stmt');
   return (
-    <aside className="doc-outline">
+    <aside className="doc-outline" id="blueprint-outline" aria-label="Chapter outline">
       <div className="olh">
         In this chapter <span className="olc">{stmts.length}</span>
       </div>

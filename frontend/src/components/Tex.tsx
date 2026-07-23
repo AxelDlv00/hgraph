@@ -65,6 +65,10 @@ export function Math({
         const t = e.target as HTMLElement;
         const refEl = t.closest('.ref[data-id]') as HTMLElement | null;
         if (refEl && onNavigate) return onNavigate(refEl.dataset.id!);
+        // a chapter/section/equation ref: no node id, so the locator is
+        // "<chapter index>:<element id>" (see latex.ts's xref)
+        const locEl = t.closest('.ref[data-loc]') as HTMLElement | null;
+        if (locEl && onNavigate) return onNavigate(locEl.dataset.loc!);
         const citeEl = t.closest('.cite[data-cite]') as HTMLElement | null;
         if (citeEl && onCite) return onCite(citeEl.dataset.cite!);
       }}

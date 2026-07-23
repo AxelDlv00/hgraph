@@ -65,7 +65,11 @@ export function StmtBox({
               {en.ref}
             </span>
           )}
-          {en?.group && <span className="grptag">{en.group}</span>}
+          {en?.sketch && (
+            <span className="sketchtag" title="\sketch — the proof is deliberately a sketch">
+              sketch
+            </span>
+          )}
           {en && <span className={`b b-${st}`}>{st.replace('_', ' ')}</span>}
         </span>
       </div>

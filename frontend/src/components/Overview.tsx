@@ -71,9 +71,9 @@ export function Overview({
                 e.stopPropagation();
                 onGotoChapter(i);
               }}
-              title={`Open chapter ${ch.num}: ${ch.title}`}
+              title={`Open chapter ${ch.num ? `${ch.num}: ` : ''}${ch.title}`}
             >
-              <span className="hn">{ch.num}</span>
+              {ch.num && <span className="hn">{ch.num}</span>}
               <Tex as="span" text={ch.title} refs={refs} />
             </button>
             <StatementSquares stmts={chStmts} onGoto={onGoto} flat />

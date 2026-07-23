@@ -74,7 +74,14 @@ export const BlockView = memo(function BlockView({
   if (b.t === 'proof')
     return (
       <details className="proof" id={anchorId}>
-        <summary>Proof</summary>
+        <summary>
+          Proof
+          {b.sketch && (
+            <span className="sketchtag" title="\sketch — this proof is deliberately a sketch">
+              sketch
+            </span>
+          )}
+        </summary>
         <Tex as="div" className="pbody" text={b.tex} macros={macros} refs={refs} cites={cites} onNavigate={onNavigate} onCite={onCite} />
       </details>
     );

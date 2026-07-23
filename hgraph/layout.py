@@ -128,29 +128,12 @@ class _Model:
             self.ch_of[i] = seen_ch[k]
         self._chapters = chapters
 
-        # compact GROUP index (the semantic-cluster axis) in first-appearance order,
-        # mirroring the chapter index. `group`/`level` are set on the entries by
-        # dashboard._assign_groups_levels before this model is built.
-        self.group_order: list = []
-        seen_g: dict = {}
-        self.grp_of = [0] * self.n
-        for i, e in enumerate(entries):
-            k = e.get("group") or "·"
-            if k not in seen_g:
-                seen_g[k] = len(self.group_order)
-                self.group_order.append(k)
-            self.grp_of[i] = seen_g[k]
-        # used-by count (how foundational a node is) → group label = its busiest hub
+        # used-by count: how foundational a node is (`level` is set on the
+        # entries by dashboard._assign_levels before this model is built)
         usedby = [0] * self.n
         for s, t, _ in self.edges:
             usedby[t] += 1
         self.usedby = usedby
-        self._grp_hub = [-1] * len(self.group_order)
-        for i in range(self.n):
-            g = self.grp_of[i]
-            h = self._grp_hub[g]
-            if h < 0 or usedby[i] > usedby[h]:
-                self._grp_hub[g] = i
 
         # statuses (border = statement, fill = proof)
         deps_adj: list[list[int]] = [[] for _ in range(self.n)]
@@ -240,17 +223,6 @@ class _Model:
             return ("Chapter %s · %s" % (num, title)) if num else title
         return _plain_tex(str(k))[:30]
 
-    def grp_label(self, g: int) -> str:
-        """A readable name for a semantic group: its most-depended-on member (the
-        hub) — mirror of the JS ``gmGroupLabel``. Falls back to the group key."""
-        h = self._grp_hub[g] if 0 <= g < len(self._grp_hub) else -1
-        if h >= 0:
-            e = self.entries[h]
-            t = _plain_tex(e.get("title") or e.get("label") or e["id"])
-            if t:
-                return t[:40] + ("…" if len(t) > 40 else "")
-        return _plain_tex(str(self.group_order[g]))[:30]
-
     def _node_line(self, i: int) -> str:
         e = self.entries[i]
         is_def = (e.get("kind") in _DEF_KINDS)
@@ -265,8 +237,8 @@ class _Model:
 
 
 def _dot_clustered(m: _Model, unit_of, n_units: int, label_fn) -> str:
-    """Full graph, every node a box, one ``subgraph cluster`` per unit (a chapter
-    or a semantic group, per ``unit_of``)."""
+    """Full graph, every node a box, one ``subgraph cluster`` per unit (the
+    chapter each node belongs to, per ``unit_of``)."""
     by_u: dict[int, list[int]] = {}
     for i in range(m.n):
         by_u.setdefault(unit_of[i], []).append(i)
@@ -341,16 +313,8 @@ def _dot_full(m: _Model) -> str:
     return _dot_clustered(m, m.ch_of, len(m.order), m.ch_label)
 
 
-def _dot_groups(m: _Model) -> str:
+def _dot_chapter_overview(m: _Model) -> str:
     return _dot_overview(m, m.ch_of, len(m.order), m.ch_label, "ch")
-
-
-def _dot_full_grouped(m: _Model) -> str:
-    return _dot_clustered(m, m.grp_of, len(m.group_order), m.grp_label)
-
-
-def _dot_group_overview(m: _Model) -> str:
-    return _dot_overview(m, m.grp_of, len(m.group_order), m.grp_label, "grp")
 
 
 def _clean_svg(svg: str) -> str:
@@ -370,7 +334,7 @@ def _run_dot(dot: str) -> str | None:
 
 def render_svgs(data: dict | None) -> dict:
     """Return the precomputed positioned SVG, laid out by ``dot`` at build
-    time: ``groups``, the collapsed chapter overview the graph modal opens on
+    time: ``overview``, the collapsed chapter overview the graph modal opens on
     — an instant first paint with no WASM layout. (A ``full`` per-node SVG
     used to be emitted too, but no frontend code ever read it: it was a
     wasted ``dot`` run and, at hundreds of statements, several hundred KB of
@@ -384,7 +348,7 @@ def render_svgs(data: dict | None) -> dict:
     except Exception:
         return {}
     out = {}
-    groups = _run_dot(_dot_groups(m))
-    if groups:
-        out["groups"] = groups
+    overview = _run_dot(_dot_chapter_overview(m))
+    if overview:
+        out["overview"] = overview
     return out

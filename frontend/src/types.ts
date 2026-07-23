@@ -116,8 +116,8 @@ export interface Entry {
   lean_verdict: 'good' | 'bad' | null;
   reviews: ReviewData[];
   comments: CommentData[];
-  /** semantic cluster id (community-detection stub or authored) — the dependency graph's group axis */
-  group: string | number | null;
+  /** `\sketch`: the proof is deliberately incomplete — a sketch, not a gap to fix */
+  sketch: boolean;
   /** how foundational this node is: coarse (most-depended-on) / medium / fine — the graph's detail-level filter */
   level: 'coarse' | 'medium' | 'fine' | null;
 }
@@ -137,14 +137,16 @@ export interface Enrich {
   status: string | null;
   tags: string[] | null;
   ref: string | null;
-  group: string | number | null;
+  sketch: boolean;
 }
 
 export interface HeadBlock {
   t: 'head';
   level: number;
   title: string;
-  num?: string;
+  /** null for a `\section*{…}`, which carries no number */
+  num?: string | null;
+  starred?: boolean;
 }
 export interface ProseBlock {
   t: 'prose';
@@ -153,6 +155,9 @@ export interface ProseBlock {
 export interface ProofBlock {
   t: 'proof';
   tex: string;
+  /** the proof carries `\sketch` — flagged in the UI so a reader knows the gap
+   *  is intentional rather than an oversight */
+  sketch?: boolean;
 }
 export interface StmtBlock {
   t: 'stmt';
@@ -174,15 +179,22 @@ export type Block = HeadBlock | ProseBlock | ProofBlock | StmtBlock;
 
 export interface Chapter {
   title: string;
-  num?: string;
+  /** "1", or "A" once `\appendix` has switched the counter to letters; null for
+   *  a `\chapter*{…}`, which is unnumbered (its sections/statements then drop
+   *  the chapter prefix too) */
+  num?: string | null;
+  starred?: boolean;
+  /** the chapter sits after `\appendix` — the TOC marks where that starts */
+  appendix?: boolean;
   blocks: Block[];
 }
 
-export interface RefEntry {
-  num: string;
-  id: string | null;
-  abbr: string;
-}
+/** what `\ref`/`\cref`/`\eqref` resolve a `\label` to — see latex.ts, which
+ *  owns the canonical definition (statements carry a node `id`; chapters,
+ *  sections and equations carry a `ch` + `anchor` scroll target instead) */
+import type { RefEntry } from './latex';
+
+export type { RefEntry };
 
 export interface BibEntry {
   key: string;

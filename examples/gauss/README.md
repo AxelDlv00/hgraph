@@ -31,8 +31,8 @@ and the theorem). Only `\chapter` starts a chapter; `\section` and below stay
 inside one as ordinary headings. Chapters are not decoration — they drive:
 
 - the document view's chapter-by-chapter reading order and its outline;
-- each statement's `chapter` field (`hgraph get label:thm:gauss`), which the
-  graph also falls back on when grouping nodes that have no dependencies;
+- each statement's `chapter` field (`hgraph get label:thm:gauss`), which is the
+  unit the dependency graph clusters and collapses by;
 - **chapter-scoped numbering** — `Def 1.1`, `Lem 1.3`, then `Thm 2.2`;
 - the Summary tab's per-chapter coverage table (Parity 67%, summation 50%).
 
@@ -58,6 +58,13 @@ node keyed on its **fully-qualified name** (`Gauss.isEven_add`), carrying its
 Lean node(s) it formalizes (recomputed each sync, so the two can't disagree);
 `\mathlibok` marks it `mathlib_ok` and records the `mathlib_name`. Every node
 also gets `author` / `created` / `updated`.
+
+`\sketch` is the one marker that is *not* a formalization state: put it in a
+`proof` (or in the statement itself) to say the argument is deliberately
+incomplete — a sketch, an omitted routine verification — and the dashboard tags
+it "sketch" on both the proof and the statement, so a reader knows the gap is
+intended rather than an oversight. Like `\leanok`, a proof's `\sketch` folds
+onto the statement it proves.
 
 ## Two independent node populations
 

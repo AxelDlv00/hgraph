@@ -53,7 +53,7 @@ export function Toc({
   };
 
   return (
-    <nav className="doc-nav">
+    <nav className="doc-nav" id="blueprint-navigation" aria-label="Blueprint navigation">
       <input
         className="navq"
         placeholder="Search statements…"
@@ -86,8 +86,12 @@ export function Toc({
       {chapters.length > 0 && <div className="navsec">Chapters</div>}
       {chapters.map((ch, i) => {
         const open = openCh.has(i);
+        // \appendix: mark where the back matter starts rather than letting the
+        // appendices read as more chapters
+        const startsAppendix = !!ch.appendix && !chapters[i - 1]?.appendix;
         return (
           <div key={i}>
+            {startsAppendix && <div className="navsec">Appendices</div>}
             <div className={`tch${i === curCh ? ' sel' : ''}`} onClick={() => onGoto(i)}>
               <span className="tchev" onClick={(e) => { e.stopPropagation(); toggleCh(i); }}>
                 {open ? '▾' : '▸'}

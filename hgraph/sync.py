@@ -110,10 +110,44 @@ def _macro_args(macro: str, text: str) -> list[str]:
     return out
 
 
+# Display-math environments. Their contents are *not* prose: a `\label` inside
+# one belongs to an equation, and is what `\cref{eq:…}` resolves against, so it
+# must survive the strippers below (and must not be mistaken for a statement's
+# own label). Starred forms are unnumbered but hold labels just the same.
+DISPLAY_ENVS = ("equation", "align", "alignat", "flalign", "gather",
+                "multline", "eqnarray", "displaymath")
+_MATH_SPAN_RE = re.compile(
+    r"\\begin\{(" + "|".join(DISPLAY_ENVS) + r")(\*?)\}.*?\\end\{\1\2\}", re.DOTALL)
+
+
+def _outside_math(text: str, fn) -> str:
+    """Apply ``fn`` to every part of ``text`` that sits outside display math."""
+    out, pos = [], 0
+    for m in _MATH_SPAN_RE.finditer(text):
+        out.append(fn(text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(fn(text[pos:]))
+    return "".join(out)
+
+
+_LABEL_RE = re.compile(r"\\label\{.*?\}", re.DOTALL)
+
+
+def _strip_labels(text: str) -> str:
+    """Drop the ``\\label``\\s that are anchors for *this* block, keeping the ones
+    inside display math — those name equations, which are numbered and
+    cross-referenced in their own right."""
+    return _outside_math(text, lambda t: _LABEL_RE.sub("", t))
+
+
 def _strip_macros(text: str) -> str:
-    # structural / provenance markers — captured into metadata, never body text
-    text = re.sub(r"\\(label|lean|uses|proves|group|level|dcref|source)\{.*?\}", "", text, flags=re.DOTALL)
-    text = re.sub(r"\\(leanok|notready|mathlibok)\b", "", text)
+    # structural / provenance markers — captured into metadata, never body text.
+    # `\group{…}` is retired: it carries no meaning any more, but it is still
+    # swallowed here so a blueprint that hasn't dropped it yet shows no junk.
+    text = _strip_labels(text)
+    text = re.sub(r"\\(lean|uses|proves|group|level|dcref|source)\{.*?\}", "", text, flags=re.DOTALL)
+    text = re.sub(r"\\(leanok|notready|mathlibok|sketch)\b", "", text)
     return text.strip()
 
 
@@ -140,19 +174,8 @@ def parse_blueprint(text: str) -> tuple[list[dict], list[dict]]:
     environment with a ``\\label``; a *proof* carries proof-side ``\\uses``."""
     # chapter headings, to attribute each statement to its chapter. Balanced-
     # brace scan so titles with nested braces (\texttt{…}, {\v C}) aren't cut off.
-    def _brace_body(i: int) -> str:
-        depth = 0
-        for k in range(i, len(text)):
-            if text[k] == "{":
-                depth += 1
-            elif text[k] == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[i + 1:k]
-        return text[i + 1:]
-
-    headings = [(mh.start(), re.sub(r"\s+", " ", _brace_body(mh.end() - 1)).strip())
-                for mh in re.finditer(r"\\chapter\*?\s*\{", text)]
+    headings = [(mh.start(), re.sub(r"\s+", " ", _brace_span(text, mh.end() - 1)[0]).strip())
+                for mh in _HEAD_RE.finditer(text) if mh.group(1) == "chapter"]
 
     def chapter_at(pos: int) -> str | None:
         prev = [h for h in headings if h[0] < pos]
@@ -181,6 +204,7 @@ def parse_blueprint(text: str) -> tuple[list[dict], list[dict]]:
             "uses": _macro_args("uses", inner),     # proof deps → uses
             "leanok": bool(re.search(r"\\leanok\b", inner)),
             "mathlibok": bool(re.search(r"\\mathlibok\b", inner)),
+            "sketch": bool(re.search(r"\\sketch\b", inner)),
         })
     return statements, proofs
 
@@ -210,13 +234,14 @@ def _brace_span(text: str, i: int) -> tuple[str, int]:
 
 def _first_arg(macro: str, text: str) -> str | None:
     """The raw (un-split) argument of the first ``\\macro{…}`` — for markers whose
-    argument is a single value that may contain commas (``\\group{Comparison, …}``)."""
+    argument is a single value that may contain commas (``\\source{Lee, p. 42}``)."""
     m = re.search(r"\\" + macro + r"\{(.*?)\}", text, re.DOTALL)
     return m.group(1).strip() if m else None
 
 
 def _statement_fields(env: str, title, inner: str) -> dict:
-    labels = _macro_args("label", inner)
+    # a \label inside display math names an equation, not the statement
+    labels = _macro_args("label", _MATH_SPAN_RE.sub("", inner))
     body = _strip_macros(inner)
     title, body = _lift_title(title, body)
     return {
@@ -231,7 +256,10 @@ def _statement_fields(env: str, title, inner: str) -> dict:
         "uses": _macro_args("uses", inner),
         "leanok": bool(re.search(r"\\leanok\b", inner)),
         "mathlibok": bool(re.search(r"\\mathlibok\b", inner)),
-        "group": _first_arg("group", inner),     # \group{…} → semantic-cluster field
+        # \sketch → the argument is deliberately incomplete (a proof sketch, an
+        # omitted routine verification). Not a status to be fixed by syncing —
+        # an author's statement about the maths, surfaced to the reader as-is.
+        "sketch": bool(re.search(r"\\sketch\b", inner)),
         "level": _first_arg("level", inner),      # \level{coarse|medium|fine} → granularity
         # Source-book provenance. `\dcref{…}` is the original spelling;
         # `\source{slug:page-0001}` is what downstream blueprints are authored
@@ -245,6 +273,74 @@ def _statement_fields(env: str, title, inner: str) -> dict:
 
 
 _HEAD = {"chapter": 1, "section": 2, "subsection": 3, "subsubsection": 4, "paragraph": 5}
+# A sectioning command, with LaTeX's two modifiers: the ``*`` form (unnumbered)
+# and the optional short title (``\chapter[Short]{The long one}``) — which used
+# to make the heading unrecognisable, so the whole chapter leaked into prose.
+_HEAD_RE = re.compile(
+    r"\\(" + "|".join(_HEAD) + r")(\*?)\s*(?:\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*)?\{")
+
+# Preamble-only commands: definitions and layout switches that are never part of
+# the document's text. A blueprint whose entry file \input{macros} (rather than
+# wrapping its body in \begin{document}) otherwise dumps the whole macro file
+# into the first chapter as prose. The macros themselves are collected
+# separately for KaTeX — see hgraph.dashboard.discover_macros.
+_PREAMBLE_CMDS = (
+    "newcommand", "renewcommand", "providecommand", "DeclareMathOperator",
+    "def", "newtheorem", "theoremstyle", "declaretheorem", "usepackage",
+    "documentclass", "newenvironment", "renewenvironment", "setlength",
+    "newlength", "definecolor", "bibliographystyle", "title", "author", "date",
+)
+_PREAMBLE_RE = re.compile(r"\\(" + "|".join(_PREAMBLE_CMDS) + r")(?![A-Za-z])")
+# standalone switches — no arguments to consume
+_SWITCH_RE = re.compile(
+    r"\\(maketitle|tableofcontents|newpage|clearpage|printbibliography"
+    r"|frontmatter|mainmatter|backmatter)\b")
+
+
+def _skip_ws(text: str, i: int) -> int:
+    while i < len(text) and text[i] in " \t\r\n":
+        i += 1
+    return i
+
+
+def _strip_definitions(chunk: str) -> str:
+    """Drop every ``\\newcommand``-like definition, arguments and all.
+
+    The arguments have to be *scanned* rather than matched: a macro body is
+    brace-balanced and routinely spans lines, so a regex either stops at the
+    first ``}`` (leaking the tail as prose — the ``\\newcommand[1]S^#1`` garbage)
+    or runs away. At most four argument tokens are consumed, which is what the
+    longest of these commands takes (``\\newtheorem{env}[shared]{Title}[section]``).
+    """
+    out, pos = [], 0
+    for m in _PREAMBLE_RE.finditer(chunk):
+        if m.start() < pos:
+            continue
+        i = _skip_ws(chunk, m.end())
+        if i < len(chunk) and chunk[i] == "*":       # \DeclareMathOperator*
+            i = _skip_ws(chunk, i + 1)
+        for n in range(4):
+            if i < len(chunk) and chunk[i] == "{":
+                _, i = _brace_span(chunk, i)
+            elif i < len(chunk) and chunk[i] == "[":
+                j = chunk.find("]", i)
+                if j < 0:
+                    break
+                i = j + 1
+            elif n == 0 and i < len(chunk) and chunk[i] == "\\":
+                # the unbraced spelling, \newcommand\R{\mathbb R} — only ever the
+                # first token, so a following ordinary macro is never swallowed
+                k = i + 1
+                while k < len(chunk) and chunk[k].isalpha():
+                    k += 1
+                i = max(k, i + 2)
+            else:
+                break
+            i = _skip_ws(chunk, i)
+        out.append(chunk[pos:m.start()])
+        pos = i
+    out.append(chunk[pos:])
+    return _SWITCH_RE.sub("", "".join(out))
 
 
 def parse_document(text: str) -> list[dict]:
@@ -258,10 +354,21 @@ def parse_document(text: str) -> list[dict]:
     env_alt = "|".join(map(re.escape, THM_ENVS))
 
     markers = []
-    for m in re.finditer(r"\\(chapter|section|subsection|subsubsection|paragraph)\*?\s*\{", text):
+    for m in _HEAD_RE.finditer(text):
         content, end = _brace_span(text, m.end() - 1)
+        # a heading's \label(s) follow it, so `\cref{sec:…}`/`\cref{chap:…}`
+        # can resolve to this heading's number
+        labels: list[str] = []
+        while True:
+            lm = re.match(r"\s*\\label\{([^}]*)\}", text[end:])
+            if not lm:
+                break
+            labels.append(lm.group(1).strip())
+            end += lm.end()
         markers.append((m.start(), end, "head", _HEAD[m.group(1)],
-                        re.sub(r"\s+", " ", content).strip()))
+                        (re.sub(r"\s+", " ", content).strip(), bool(m.group(2)), labels)))
+    for m in re.finditer(r"\\appendix\b", text):
+        markers.append((m.start(), m.end(), "appendix", None, None))
     for m in re.finditer(r"\\begin\{(" + env_alt + r")\}(?:" + _OPT_TITLE + r")?(.*?)\\end\{\1\}", text, re.DOTALL):
         markers.append((m.start(), m.end(), "stmt", m.group(1), (m.group(2), m.group(3))))
     for m in re.finditer(r"\\begin\{proof\}(.*?)\\end\{proof\}", text, re.DOTALL):
@@ -269,12 +376,16 @@ def parse_document(text: str) -> list[dict]:
     markers.sort(key=lambda x: x[0])
 
     chapters: list[dict] = []
+    # anything before the first \chapter — a real introduction, or (when the
+    # blueprint has no \begin{document}) just the preamble, in which case
+    # _strip_definitions empties it and no phantom chapter is emitted at all.
     cur = {"title": "Introduction", "blocks": []}
+    appendix = False
 
     def prose(a: int, b: int):
         chunk = re.sub(r"(?<!\\)%.*", "", text[a:b])           # drop LaTeX line-comments
-        chunk = re.sub(r"\\label\{[^}]*\}", "", chunk)         # anchors, not content
-        chunk = re.sub(r"\\(maketitle|tableofcontents|newpage|clearpage)\b", "", chunk).strip()
+        chunk = _strip_labels(chunk)          # anchors, not content (equations keep theirs)
+        chunk = _strip_definitions(chunk).strip()
         if chunk:
             cur["blocks"].append({"t": "prose", "tex": chunk})
 
@@ -283,18 +394,32 @@ def parse_document(text: str) -> list[dict]:
         if s < pos:                     # inside an already-consumed span
             continue
         prose(pos, s)
-        if kind == "head" and meta == 1:
+        if kind == "appendix":
+            appendix = True             # applies from the next \chapter on
+        elif kind == "head" and meta == 1:
             if cur["blocks"]:
                 chapters.append(cur)
-            cur = {"title": data, "blocks": []}
+            title, starred, labels = data
+            cur = {"title": title, "blocks": []}
+            if starred:
+                cur["starred"] = True
+            if appendix:
+                cur["appendix"] = True
+            if labels:
+                cur["labels"] = labels
         elif kind == "head":
-            cur["blocks"].append({"t": "head", "level": meta, "title": data})
+            title, starred, labels = data
+            cur["blocks"].append({"t": "head", "level": meta, "title": title,
+                                  **({"starred": True} if starred else {}),
+                                  **({"labels": labels} if labels else {})})
         elif kind == "stmt":
             env, (opt, inner) = meta, data
             cur["blocks"].append({"t": "stmt", **_statement_fields(env, opt, inner)})
         elif kind == "proof":
-            cur["blocks"].append({"t": "proof", "tex": _strip_macros(
-                re.sub(r"(?<!\\)%.*", "", data)).strip()})
+            cur["blocks"].append({"t": "proof",
+                                  **({"sketch": True} if re.search(r"\\sketch\b", data) else {}),
+                                  "tex": _strip_macros(
+                                      re.sub(r"(?<!\\)%.*", "", data)).strip()})
         pos = e
     prose(pos, len(text))
     if cur["blocks"]:
@@ -304,10 +429,10 @@ def parse_document(text: str) -> list[dict]:
 
 def _assoc_proofs(statements: list[dict], proofs: list[dict]) -> dict[str, set[str]]:
     """Map each statement label → the set of labels its proof ``\\uses``, folding
-    each proof's ``\\leanok`` / ``\\mathlibok`` back into its statement. A proof
-    with ``\\proves{lbl}`` binds to that label — any of the statement's labels,
-    canonical or legacy alias, resolved to the canonical one — otherwise to the
-    nearest preceding statement."""
+    each proof's ``\\leanok`` / ``\\mathlibok`` / ``\\sketch`` back into its
+    statement. A proof with ``\\proves{lbl}`` binds to that label — any of the
+    statement's labels, canonical or legacy alias, resolved to the canonical one
+    — otherwise to the nearest preceding statement."""
     by_label = {s["label"]: s for s in statements}
     # \proves{} may name a legacy alias (a statement's 2nd+ \label); fold it
     # to the canonical label or the proof's uses/leanok silently vanish
@@ -326,6 +451,7 @@ def _assoc_proofs(statements: list[dict], proofs: list[dict]) -> dict[str, set[s
         if label in by_label:
             by_label[label]["leanok"] |= pr["leanok"]
             by_label[label]["mathlibok"] |= pr["mathlibok"]
+            by_label[label]["sketch"] |= pr["sketch"]
     return proof_uses
 
 
@@ -546,7 +672,10 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
                        "label": s["label"], "chapter": s["chapter"],
                        "order": i, "lean_status": status,
                        "mathlib_name": mathlib_names or None,
-                       "group": s.get("group") or None,
+                       # a retired owned field: kept at None so a re-sync strips
+                       # the leftover `group:` from nodes written before it went
+                       "group": None,
+                       "sketch": True if s.get("sketch") else None,
                        "level": s.get("level") or None,
                        "ref": s.get("ref") or None},
                 dry_run=dry_run)

@@ -11,19 +11,48 @@ import { Summary } from './Summary';
 import { Bibliography } from './Bibliography';
 import { citeNums, plainTex } from '../latex';
 import { setDefaultMacros } from '../typeset';
-import { Network } from 'lucide-react';
+import {
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+} from 'lucide-react';
 
 // how many search results render at once — past this, a broad query (one
 // letter, or a bare status chip on a large blueprint) would typeset hundreds
 // of KaTeX boxes for content nobody scrolls through
 const MAX_RESULTS = 120;
 
+function useStoredPanelState(key: string): [boolean, () => void] {
+  const [open, setOpen] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(key);
+      return stored === null ? true : stored === 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, String(open));
+    } catch {
+      // Storage can be disabled; the controls still work for this session.
+    }
+  }, [key, open]);
+
+  return [open, () => setOpen((current) => !current)];
+}
+
 function flashEl(id: string) {
   requestAnimationFrame(() => {
-    const el = document.getElementById(id);
+    let el = document.getElementById(id);
     if (!el) return;
+    // an equation marker has no box of its own — flash the display it precedes
+    if (el.classList.contains('eqa')) el = (el.nextElementSibling as HTMLElement) || el;
     el.classList.add('flash');
-    window.setTimeout(() => el.classList.remove('flash'), 1700);
+    window.setTimeout(() => el!.classList.remove('flash'), 1700);
   });
 }
 
@@ -54,6 +83,8 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
   // `renderOverview()` — a specific chapter's full prose ("doc") is one
   // click away, not the default.
   const [view, setView] = useState<ViewName>('overview');
+  const [leftPanelOpen, toggleLeftPanel] = useStoredPanelState('hgraph:blueprint:left-panel');
+  const [rightPanelOpen, toggleRightPanel] = useStoredPanelState('hgraph:blueprint:right-panel');
 
   // project macros apply to every typeset on the page, including titles that
   // don't thread a macros prop (TOC, overview, summary, bibliography)
@@ -116,9 +147,30 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
   // \cite{key} renders as its bibliography number, the way LaTeX numbers it
   const cites = useMemo(() => citeNums(data?.bib), [data]);
 
+  // Scroll to any element within a chapter, switching to it first — the target
+  // of a chapter/section/equation `\ref`, and of the bibliography's "Cited in".
+  // An empty `elementId` just opens the chapter at its top.
+  const gotoAnchor = useCallback((chapterIndex: number, elementId: string) => {
+    setView('doc');
+    setQuery('');
+    setStatusFilter(new Set());
+    setCurCh(chapterIndex);
+    setSelectedId(null);
+    setAnchor(elementId || null);
+    if (!elementId) return;
+    requestAnimationFrame(() => {
+      document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    flashEl(elementId);
+  }, []);
+
   // useCallback: navigate is a prop of every memoised BlockView — a fresh
   // closure per render would defeat the memo and re-render whole chapters
   const navigate = useCallback((id: string) => {
+    // a "<chapter index>:<element id>" locator rather than a node id — what
+    // latex.ts's xref emits for the refs that have no graph node behind them
+    const locator = id.match(/^(\d+):(.*)$/);
+    if (locator) return gotoAnchor(Number(locator[1]), locator[2]);
     setView('doc');
     if (!chapters.length) {
       setSelectedId(id);
@@ -136,7 +188,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     flashEl(`stmt-${id}`);
     const e = data?.entries.find((x) => x.id === id);
     setHash(e?.label || id);
-  }, [data, chapters, curCh, setHash]);
+  }, [data, chapters, curCh, setHash, gotoAnchor]);
 
   const openInGraph = useCallback((id: string) => {
     setGraphSelectedId(id);
@@ -163,17 +215,8 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
   // like navigate(), but the target is any block (prose/proof included), keyed
   // by its ChapterView anchor rather than a statement id
   const gotoLoc = useCallback((chapterIndex: number, _blockIndex: number, blockAnchor: string) => {
-    setView('doc');
-    setQuery('');
-    setStatusFilter(new Set());
-    setCurCh(chapterIndex);
-    setSelectedId(null);
-    setAnchor(blockAnchor);
-    requestAnimationFrame(() => {
-      document.getElementById(blockAnchor)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-    flashEl(blockAnchor);
-  }, []);
+    gotoAnchor(chapterIndex, blockAnchor);
+  }, [gotoAnchor]);
 
   function gotoChapter(chapterIndex: number) {
     setView('doc');
@@ -310,6 +353,30 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
           </a>
           <h1>{data.docTitle || data.title}</h1>
           <span className="sub">blueprint</span>
+          <div className="project-panel-controls" aria-label="Blueprint panels">
+            <button
+              type="button"
+              className="panel-toggle panel-toggle-left"
+              onClick={toggleLeftPanel}
+              aria-controls="blueprint-navigation"
+              aria-expanded={leftPanelOpen}
+              title={leftPanelOpen ? 'Collapse navigation panel' : 'Expand navigation panel'}
+            >
+              {leftPanelOpen ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
+              <span className="sr-only">{leftPanelOpen ? 'Collapse' : 'Expand'} navigation panel</span>
+            </button>
+            <button
+              type="button"
+              className="panel-toggle panel-toggle-right"
+              onClick={toggleRightPanel}
+              aria-controls="blueprint-outline"
+              aria-expanded={rightPanelOpen}
+              title={rightPanelOpen ? 'Collapse chapter outline' : 'Expand chapter outline'}
+            >
+              {rightPanelOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRightOpen aria-hidden="true" />}
+              <span className="sr-only">{rightPanelOpen ? 'Collapse' : 'Expand'} chapter outline</span>
+            </button>
+          </div>
           <div className="project-stats">
             <span className="pstat">
               <b>{stats.total}</b> statements
@@ -333,7 +400,9 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
         </div>
       </header>
 
-      <div className="doc-wrap">
+      <div
+        className={`doc-wrap${leftPanelOpen ? '' : ' nav-collapsed'}${rightPanelOpen ? '' : ' outline-collapsed'}`}
+      >
         <Toc
           chapters={chapters}
           refs={refs}

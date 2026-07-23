@@ -53,6 +53,16 @@ function blockAnchor(b: BlockT, i: number): string {
   return `blk-${i}`;
 }
 
+/** An `eq-<num>` anchor belongs to a display equation *inside* a block, marked
+ * by the `\tag{<num>}` the backend wrote into its TeX — so a `\cref{eq:…}`
+ * still knows which block to hydrate before scrolling. */
+function holdsAnchor(b: BlockT, i: number, anchor: string): boolean {
+  if (blockAnchor(b, i) === anchor) return true;
+  if (!anchor.startsWith('eq-')) return false;
+  const tex = b.t === 'stmt' ? b.body : b.t === 'prose' || b.t === 'proof' ? b.tex : '';
+  return tex.includes(`\\tag{${anchor.slice(3)}}`);
+}
+
 /** A not-yet-hydrated block: keeps the block's anchor id and roughly its
  * shape so the scrollbar doesn't jump wildly, at none of the LaTeX/KaTeX
  * cost. Headings render their (plain-text) title immediately — they're cheap
@@ -121,7 +131,7 @@ export function ChapterView({
   // render paid before hydration existed.
   useLayoutEffect(() => {
     if (!anchor) return;
-    const idx = blocks.findIndex((b, i) => blockAnchor(b, i) === anchor);
+    const idx = blocks.findIndex((b, i) => holdsAnchor(b, i, anchor));
     if (idx >= 0) setMounted((m) => Math.max(m, idx + 1));
   }, [anchor, blocks]);
 

@@ -31,6 +31,17 @@
 * {
   box-sizing: border-box;
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 body {
   margin: 0;
   background: var(--bg);
@@ -308,6 +319,24 @@ a {
   color: var(--heading);
 }
 .project-htop .sub { color: var(--muted); font-size: 13px; }
+.project-panel-controls { display: inline-flex; align-items: center; gap: 3px; }
+.panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+.panel-toggle svg { width: 16px; height: 16px; }
+.panel-toggle:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, #fff); border-color: var(--line); }
+.panel-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .project-home {
   font-size: 12.5px;
   color: var(--muted);
@@ -682,20 +711,45 @@ a {
 /* ==== document view (chapters/prose/statements) — ported 1:1 from the
    original dashboard's colors/spacing ==== */
 .doc-wrap {
+  --doc-left-width: 264px;
+  --doc-right-width: 250px;
+  --doc-main-width: 860px;
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr) 250px;
+  grid-template-columns: var(--doc-left-width) minmax(0, 1fr) var(--doc-right-width);
   max-width: 1560px;
   margin: 0 auto;
   gap: 0;
   align-items: start;
+  transition: grid-template-columns 0.2s ease;
+}
+.doc-wrap.nav-collapsed {
+  --doc-left-width: 0px;
+  --doc-main-width: 1020px;
+}
+.doc-wrap.outline-collapsed {
+  --doc-right-width: 0px;
+  --doc-main-width: 1020px;
+}
+.doc-wrap.nav-collapsed.outline-collapsed { --doc-main-width: 1180px; }
+.doc-wrap.nav-collapsed .doc-nav,
+.doc-wrap.outline-collapsed .doc-outline {
+  visibility: hidden;
+  opacity: 0;
+  overflow: hidden;
+  padding-left: 0;
+  padding-right: 0;
+  border: 0;
+  pointer-events: none;
 }
 @media (max-width: 1240px) {
-  .doc-wrap { grid-template-columns: 264px minmax(0, 1fr); }
+  .doc-wrap { grid-template-columns: var(--doc-left-width) minmax(0, 1fr); }
   .doc-outline { display: none; }
+  .panel-toggle-right { display: none; }
 }
 @media (max-width: 900px) {
   .doc-wrap { grid-template-columns: 1fr; }
   .doc-nav { display: none; }
+  .panel-toggle-left { display: none; }
 }
 .doc-nav, .doc-outline {
   position: sticky;
@@ -704,10 +758,13 @@ a {
   max-height: calc(100vh - 68px);
   overflow: auto;
   padding: 14px 10px 40px;
+  min-width: 0;
+  scrollbar-gutter: stable;
+  transition: opacity 0.15s ease;
 }
 .doc-nav { border-right: 1px solid var(--line); }
 .doc-outline { border-left: 1px solid var(--line); padding: 14px 6px 40px; }
-.doc-main { padding: 10px 32px 90px; min-width: 0; max-width: 860px; }
+.doc-main { width: 100%; padding: 10px 32px 90px; min-width: 0; max-width: var(--doc-main-width); justify-self: center; transition: max-width 0.2s ease; }
 
 .navq {
   width: 100%;
@@ -890,7 +947,11 @@ blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--
 .b-sorry { background: var(--sorry-bg); color: var(--sorry); }
 .b-empty { background: var(--empty-bg); color: var(--empty); }
 .reftag { font-size: 11px; padding: 2px 8px; border-radius: 7px; font-weight: 600; background: var(--bg); color: var(--muted); white-space: nowrap; }
-.grptag { font-size: 11px; padding: 2px 8px; border-radius: 7px; font-weight: 600; background: #eef1ff; color: #4f46e5; white-space: nowrap; }
+/* `\sketch` — the author marked the proof as deliberately incomplete. Amber,
+   deliberately outside the formalization-status palette: it is a claim about
+   the maths, not a Lean state to be driven to green. */
+.sketchtag { font-size: 11px; padding: 2px 8px; border-radius: 7px; font-weight: 600; background: #fdf0d5; color: #92400e; white-space: nowrap; font-style: normal; }
+details.proof > summary .sketchtag { margin-left: 7px; }
 .sbody { margin: 9px 0 2px; text-align: justify; color: var(--heading); }
 .smeta { font-size: 12.5px; color: var(--muted); margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .mtag { font-size: 11.5px; padding: 2px 9px; border-radius: 7px; background: var(--bg); color: var(--muted); white-space: nowrap; border: 1px solid transparent; font-variant-numeric: tabular-nums; }
@@ -928,6 +989,18 @@ blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 3px solid var(--
 .mtag.rv[open] { flex-basis: 100%; }
 .mtag.rv[open] > summary { margin-bottom: 8px; color: var(--heading); border-color: var(--line); }
 
+.tex-bold { color: var(--accent); }
+.tex-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+.tex-url { overflow-wrap: anywhere; }
+.tex-link:hover { color: color-mix(in srgb, var(--accent) 78%, #111827); text-decoration-color: currentColor; }
+.tex-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 .ref { color: var(--accent); font-weight: 550; cursor: pointer; white-space: nowrap; }
 .ref:hover { text-decoration: underline; }
 .xref { color: var(--muted); }
@@ -1072,5 +1145,12 @@ pre.lean { background: #f8f9fb; border: 1px solid var(--line); border-radius: 8p
 .bibitem .bi-n { color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 2px; }
 .bibitem .bi-c { font-size: 12.5px; color: var(--muted); margin-top: 5px; }
 .bibitem .bi-c .citeloc { font-variant-numeric: tabular-nums; }
-.stmt.flash, .bibitem.flash, .prose.flash, details.proof.flash { animation: flash 1.7s ease; border-radius: 6px; }
+.stmt.flash, .bibitem.flash, .prose.flash, details.proof.flash, .katex-display.flash { animation: flash 1.7s ease; border-radius: 6px; }
+/* the scroll target of an `\eqref`/`\cref` to an equation: an empty marker
+   sitting just before the display it names (see latex.ts's mathEnvs) */
+.eqa { display: block; height: 0; scroll-margin-top: 80px; }
 @keyframes flash { 0%, 20% { background: #fff6d6; } 100% { background: var(--panel); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-wrap, .doc-main, .doc-nav, .doc-outline, .panel-toggle, .tex-link { transition: none; }
+}
