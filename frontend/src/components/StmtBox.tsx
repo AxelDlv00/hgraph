@@ -1,5 +1,5 @@
 import type { StmtBlock, RefEntry, Dep } from '../types';
-import type { CiteNums } from '../latex';
+import { leanHi, type CiteNums } from '../latex';
 import { Math as Tex } from './Tex';
 import { Reviews } from './Reviews';
 import { Network } from 'lucide-react';
@@ -10,18 +10,93 @@ const ABBR: Record<string, string> = {
 };
 
 /** The compact, document-flow statement box — tag/number, title, status
- * badge, prose body, and a row of small popup-trigger tags — ported from the
- * original `stmtBox()`. The statement's own body IS its full detail (this is
- * the document, not a compact graph node), so clicking the box just
- * navigates/highlights it in place; "uses/used-by" and "Lean" open a
- * click-pinned popup (wired globally in HoverPreview via the `data-graph`/
- * `data-lean` attributes below), never a side panel. */
+ * badge, prose body, and expandable metadata sections. The statement's own
+ * body IS its full detail (this is the document, not a compact graph node), so
+ * clicking the box just navigates/highlights it in place. */
+
+function DependencyDetails({
+  uses,
+  usedBy,
+  refs,
+  macros,
+  onNavigate,
+}: {
+  uses: Dep[];
+  usedBy: Dep[];
+  refs: Record<string, RefEntry>;
+  macros: Record<string, string>;
+  onNavigate: (id: string) => void;
+}) {
+  const links = (items: Dep[], empty: string) =>
+    items.length ? (
+      <div className="stmt-detail-links">
+        {items.map((d) => (
+          <button key={d.id} type="button" className="stmt-detail-link" onClick={() => onNavigate(d.id)}>
+            <Tex as="span" text={d.title || d.label || d.id} macros={macros} refs={refs} />
+          </button>
+        ))}
+      </div>
+    ) : (
+      <div className="stmt-detail-empty">{empty}</div>
+    );
+
+  return (
+    <details className="stmt-detail">
+      <summary className="mtag mtag-detail-summary">uses {uses.length} · used by {usedBy.length}</summary>
+      <div className="stmt-detail-body stmt-deps-body">
+        <section>
+          <div className="stmt-detail-label">Uses</div>
+          {links(uses, 'No direct dependencies.')}
+        </section>
+        <section>
+          <div className="stmt-detail-label">Used by</div>
+          {links(usedBy, 'Nothing depends on this yet.')}
+        </section>
+      </div>
+    </details>
+  );
+}
+
+function LeanDetails({
+  lean,
+  mathlibName,
+}: {
+  lean: NonNullable<StmtBlock['enrich']>['lean'];
+  mathlibName: string[] | null;
+}) {
+  if (!lean.length && !mathlibName) return null;
+  if (!lean.length) {
+    return (
+      <details className="stmt-detail">
+        <summary className="mtag mathlib mtag-detail-summary">mathlib</summary>
+        <div className="stmt-detail-body stmt-mathlib-body"><code>{mathlibName!.join(', ')}</code></div>
+      </details>
+    );
+  }
+  return (
+    <details className="stmt-detail">
+      <summary className="mtag lean mtag-detail-summary">✓ L∃∀N · {lean.length}</summary>
+      <div className="stmt-detail-body stmt-lean-body">
+        {lean.map((l) => (
+          <div key={l.name} className="lean-block">
+            <div className="lean-head">
+              <code>{l.name}</code>
+              <span className={`b b-${l.status || 'empty'}`}>{(l.status || 'empty').replace('_', ' ')}</span>
+            </div>
+            {l.code && <pre className="lean-code" dangerouslySetInnerHTML={{ __html: leanHi(l.code) }} />}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export function StmtBox({
   b,
   refs,
   cites,
   macros,
-  usedByCount,
+  usedBy,
   selected,
   onSelect,
   onNavigate,
@@ -34,7 +109,7 @@ export function StmtBox({
   refs: Record<string, RefEntry>;
   cites?: CiteNums;
   macros: Record<string, string>;
-  usedByCount: number;
+  usedBy: Dep[];
   selected: boolean;
   onSelect: (id: string) => void;
   onNavigate: (id: string) => void;
@@ -47,7 +122,7 @@ export function StmtBox({
 }) {
   const en = b.enrich;
   const st = en ? en.lean_status : 'empty';
-  const usesCount = (en?.deps || []).length;
+  const uses = en?.deps || [];
   return (
     <div
       className={`stmt k-${b.content_type}${selected ? ' sel' : ''}`}
@@ -85,19 +160,8 @@ export function StmtBox({
             <Network size={13} strokeWidth={2} aria-hidden="true" />
             Open in graph
           </button>
-          <span className="mtag pop" data-graph={b.id}>
-            uses {usesCount} · used by {usedByCount}
-          </span>
-          {en?.lean && en.lean.length > 0 && (
-            <span className="mtag pop lean" data-lean={b.id}>
-              ✓ L∃∀N · {en.lean.length}
-            </span>
-          )}
-          {!en?.lean?.length && en?.mathlib_name && (
-            <span className="mtag pop mathlib" data-lean={b.id}>
-              mathlib
-            </span>
-          )}
+          <DependencyDetails uses={uses} usedBy={usedBy} refs={refs} macros={macros} onNavigate={onNavigate} />
+          {en && <LeanDetails lean={en.lean} mathlibName={en.mathlib_name} />}
           {en && (
             <Reviews
               className="mtag rv"

@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { Block as BlockT, RefEntry } from '../types';
+import type { Block as BlockT, Dep, RefEntry } from '../types';
 import type { CiteNums } from '../latex';
 import { Math as Tex } from './Tex';
 import { StmtBox } from './StmtBox';
@@ -15,7 +15,7 @@ export const BlockView = memo(function BlockView({
   refs,
   cites,
   macros,
-  usedByCount,
+  usedBy,
   selected,
   onSelect,
   onNavigate,
@@ -32,7 +32,7 @@ export const BlockView = memo(function BlockView({
   refs: Record<string, RefEntry>;
   cites?: CiteNums;
   macros: Record<string, string>;
-  usedByCount: number;
+  usedBy: Dep[];
   selected: boolean;
   onSelect: (id: string) => void;
   onNavigate: (id: string) => void;
@@ -61,7 +61,7 @@ export const BlockView = memo(function BlockView({
         refs={refs}
         cites={cites}
         macros={macros}
-        usedByCount={usedByCount}
+        usedBy={usedBy}
         selected={selected}
         onSelect={onSelect}
         onNavigate={onNavigate}

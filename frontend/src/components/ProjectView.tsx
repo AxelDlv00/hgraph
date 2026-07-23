@@ -134,11 +134,6 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     }
     return map;
   }, [data]);
-  const usedByCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    usedByMap.forEach((v, k) => m.set(k, v.length));
-    return m;
-  }, [usedByMap]);
   const byId = useMemo(() => new Map((data?.entries || []).map((e) => [e.id, e])), [data]);
 
   // stable identities per fetch — BlockView is memoised on these
@@ -353,30 +348,6 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
           </a>
           <h1>{data.docTitle || data.title}</h1>
           <span className="sub">blueprint</span>
-          <div className="project-panel-controls" aria-label="Blueprint panels">
-            <button
-              type="button"
-              className="panel-toggle panel-toggle-left"
-              onClick={toggleLeftPanel}
-              aria-controls="blueprint-navigation"
-              aria-expanded={leftPanelOpen}
-              title={leftPanelOpen ? 'Collapse navigation panel' : 'Expand navigation panel'}
-            >
-              {leftPanelOpen ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
-              <span className="sr-only">{leftPanelOpen ? 'Collapse' : 'Expand'} navigation panel</span>
-            </button>
-            <button
-              type="button"
-              className="panel-toggle panel-toggle-right"
-              onClick={toggleRightPanel}
-              aria-controls="blueprint-outline"
-              aria-expanded={rightPanelOpen}
-              title={rightPanelOpen ? 'Collapse chapter outline' : 'Expand chapter outline'}
-            >
-              {rightPanelOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRightOpen aria-hidden="true" />}
-              <span className="sr-only">{rightPanelOpen ? 'Collapse' : 'Expand'} chapter outline</span>
-            </button>
-          </div>
           <div className="project-stats">
             <span className="pstat">
               <b>{stats.total}</b> statements
@@ -403,6 +374,30 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
       <div
         className={`doc-wrap${leftPanelOpen ? '' : ' nav-collapsed'}${rightPanelOpen ? '' : ' outline-collapsed'}`}
       >
+        <div className="panel-rails" aria-label="Blueprint panels">
+          <button
+            type="button"
+            className="panel-toggle panel-rail panel-rail-left"
+            onClick={toggleLeftPanel}
+            aria-controls="blueprint-navigation"
+            aria-expanded={leftPanelOpen}
+            title={leftPanelOpen ? 'Collapse navigation panel' : 'Expand navigation panel'}
+          >
+            {leftPanelOpen ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
+            <span className="sr-only">{leftPanelOpen ? 'Collapse' : 'Expand'} navigation panel</span>
+          </button>
+          <button
+            type="button"
+            className="panel-toggle panel-rail panel-rail-right"
+            onClick={toggleRightPanel}
+            aria-controls="blueprint-outline"
+            aria-expanded={rightPanelOpen}
+            title={rightPanelOpen ? 'Collapse chapter outline' : 'Expand chapter outline'}
+          >
+            {rightPanelOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRightOpen aria-hidden="true" />}
+            <span className="sr-only">{rightPanelOpen ? 'Collapse' : 'Expand'} chapter outline</span>
+          </button>
+        </div>
         <Toc
           chapters={chapters}
           refs={refs}
@@ -434,7 +429,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
                   refs={refs}
                   cites={cites}
                   macros={data.macros}
-                  usedByCount={(b.id && usedByCounts.get(b.id)) || 0}
+                  usedBy={(b.id && usedByMap.get(b.id)) || []}
                   selected={selectedId === b.id}
                   onSelect={navigate}
                   onNavigate={navigate}
@@ -467,7 +462,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
               refs={refs}
               cites={cites}
               macros={data.macros}
-              usedBy={usedByCounts}
+              usedBy={usedByMap}
               selectedId={selectedId}
               onSelect={navigate}
               onNavigate={navigate}

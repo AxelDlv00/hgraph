@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
-import type { Block as BlockT, Chapter, RefEntry, StmtBlock } from '../types';
+import type { Block as BlockT, Chapter, Dep, RefEntry, StmtBlock } from '../types';
 import { BlockView } from './Block';
 import { Math as Tex } from './Tex';
 import { plainTex } from '../latex';
@@ -108,7 +108,7 @@ export function ChapterView({
   refs: Record<string, RefEntry>;
   cites?: CiteNums;
   macros: Record<string, string>;
-  usedBy: Map<string, number>;
+  usedBy: Map<string, Dep[]>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNavigate: (id: string) => void;
@@ -173,7 +173,7 @@ export function ChapterView({
           refs={refs}
           cites={cites}
           macros={macros}
-          usedByCount={(b.t === 'stmt' && b.id && usedBy.get(b.id)) || 0}
+          usedBy={(b.t === 'stmt' && b.id && usedBy.get(b.id)) || []}
           selected={b.t === 'stmt' && !!b.id && b.id === selectedId}
           onSelect={onSelect}
           onNavigate={onNavigate}

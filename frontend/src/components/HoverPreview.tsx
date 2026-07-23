@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Dep, Entry, ProjectData } from '../types';
+import type { ProjectData } from '../types';
 import { leanHi, esc, citeNums, proseHtml } from '../latex';
-import { localDepGraph } from '../depgraph';
 import { stmtPreviewHtml } from '../previews';
 import { CHAPTER_ID_RE } from '../graphDot';
 import { typesetMath } from '../typeset';
@@ -14,20 +13,16 @@ interface PvState {
 
 /**
  * The floating hover-preview popup — ported from the original's `showPv`/
- * `stmtPv`/`leanPv`/`citePv`/`graphPv`/`leanTagPv`: hovering a `.ref[data-id]`
+ * `stmtPv`/`leanPv`/`citePv`: hovering a `.ref[data-id]`
  * (cross-reference), `.leanref[data-name]` (a Lean declaration name), or
  * `.cite[data-cite]` (a bibliography citation) pops up a small preview near
- * the cursor after a short delay; clicking a `.mtag.pop[data-graph]`
- * ("uses N · used by N") or `.mtag.pop[data-lean]` ("Lean"/"mathlib") pins a
- * bigger popup with the local dependency mini-graph or the full Lean code —
- * these are click-only, never hover, matching the original. Pins on click,
- * dismisses on outside-click. One instance, mounted once, listening on the
- * whole document (event delegation, since the links themselves are raw HTML
- * from `detex`, not JSX).
+ * the cursor after a short delay. Uses/Lean details are rendered inline in
+ * their statement card, so they do not compete with this transient preview.
+ * One instance is mounted once, listening on the whole document (event
+ * delegation, since the links themselves are raw HTML from `detex`, not JSX).
  */
 export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; root: string; onNavigate: (id: string) => void }) {
   const [pv, setPv] = useState<PvState | null>(null);
-  const pinnedRef = useRef(false);
   const showT = useRef<number | undefined>(undefined);
   const hideT = useRef<number | undefined>(undefined);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -35,16 +30,6 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
   useEffect(() => {
     const byId = new Map(data.entries.map((e) => [e.id, e]));
     const bib = new Map((data.bib || []).map((b, i) => [b.key, { ...b, _n: i + 1 }]));
-    const rev = new Map<string, Entry[]>();
-    for (const e of data.entries) {
-      for (const d of e.deps) {
-        const target = byId.get(d.id);
-        if (!target) continue;
-        if (!rev.has(d.id)) rev.set(d.id, []);
-        rev.get(d.id)!.push(e);
-      }
-    }
-
     const cites = citeNums(data.bib);
     function stmtPreview(id: string): string | null {
       const e = byId.get(id);
@@ -78,43 +63,18 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
       }
       return null;
     }
-    function graphPreview(id: string): string | null {
-      const e = byId.get(id);
-      if (!e) return null;
-      const ups = e.deps.map((d: Dep) => byId.get(d.id)).filter((x): x is Entry => !!x);
-      const downs = rev.get(id) || [];
-      return `<div class="pv-graphwrap"><div class="pk">Local dependencies</div>${localDepGraph(e, ups, downs)}</div>`;
-    }
-    function leanTagPreview(id: string): string | null {
-      const e = byId.get(id);
-      if (!e) return null;
-      if (e.lean.length) {
-        return e.lean
-          .map((l) => `<div class="pk">Lean · ${esc(l.name)}${l.status ? ' · ' + l.status.replace('_', ' ') : ''}</div>${l.code ? `<pre class="lean">${leanHi(l.code)}</pre>` : ''}`)
-          .join('');
-      }
-      if (e.mathlib_name) return `<div class="pk">Mathlib</div><div style="margin-top:4px">${esc(([] as string[]).concat(e.mathlib_name).join(', '))}</div>`;
-      return null;
-    }
-
     function show(html: string, x: number, y: number) {
       setPv({ html, x, y });
     }
-    function showPinned(html: string, x: number, y: number) {
-      pinnedRef.current = false;
-      show(html, x, y);
-      pinnedRef.current = true;
-    }
     function hide() {
-      if (!pinnedRef.current) setPv(null);
+      setPv(null);
     }
     function schedHide() {
       window.clearTimeout(hideT.current);
-      if (!pinnedRef.current) hideT.current = window.setTimeout(hide, 260);
+      hideT.current = window.setTimeout(hide, 260);
     }
 
     function onOver(ev: MouseEvent) {
-      if (pinnedRef.current) return;
       const t = ev.target as HTMLElement;
       // a bibliography "Cited in" link — carries `data-loc`, and is also a
       // `.ref`, so it must be matched before the plain `.ref[data-id]` branch
@@ -163,7 +123,7 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
       }
     }
     function onOut(ev: MouseEvent) {
-      if (!pinnedRef.current && (ev.target as HTMLElement).closest('.ref,.leanref,.cite,.mm[data-id],.node[data-nid]')) {
+      if ((ev.target as HTMLElement).closest('.ref,.leanref,.cite,.mm[data-id],.node[data-nid]')) {
         window.clearTimeout(showT.current);
         schedHide();
       }
@@ -173,23 +133,12 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
 
       const gn = t.closest('.gn[data-id]') as HTMLElement | null;
       if (gn?.dataset.id) {
-        pinnedRef.current = false;
         setPv(null);
         onNavigate(gn.dataset.id);
         return;
       }
 
-      const popEl = t.closest('.mtag.pop[data-graph], .mtag.pop[data-lean]') as HTMLElement | null;
-      if (popEl) {
-        const gid = popEl.dataset.graph;
-        const lid = popEl.dataset.lean;
-        const h = gid ? graphPreview(gid) : lid ? leanTagPreview(lid) : null;
-        if (h) showPinned(h, ev.clientX, ev.clientY);
-        return;
-      }
-
-      if (boxRef.current && !boxRef.current.contains(t) && !t.closest('.ref,.leanref,.cite,.mtag.pop')) {
-        pinnedRef.current = false;
+      if (boxRef.current && !boxRef.current.contains(t) && !t.closest('.ref,.leanref,.cite')) {
         setPv(null);
       }
     }
@@ -214,23 +163,20 @@ export function HoverPreview({ data, root, onNavigate }: { data: ProjectData; ro
   });
 
   if (!pv) return null;
-  const isGraph = pv.html.includes('pv-graphwrap');
   const style: React.CSSProperties = {
     position: 'fixed',
     zIndex: 60,
-    left: Math.min(pv.x + 14, window.innerWidth - (isGraph ? Math.min(760, window.innerWidth * 0.94) : 480) - 10),
+    left: Math.min(pv.x + 14, window.innerWidth - 480 - 10),
     top: Math.max(10, Math.min(pv.y + 16, window.innerHeight - 200)),
   };
   return (
     <div
       ref={boxRef}
       id="pv"
-      className={`pv${isGraph ? ' pv-graph' : ''}`}
+      className="pv"
       style={style}
       onMouseEnter={() => window.clearTimeout(hideT.current)}
-      onMouseLeave={() => {
-        if (!pinnedRef.current) setPv(null);
-      }}
+      onMouseLeave={() => setPv(null)}
       dangerouslySetInnerHTML={{ __html: pv.html }}
     />
   );
