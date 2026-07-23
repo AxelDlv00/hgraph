@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Chapter, RefEntry } from '../types';
+import type { Chapter, ContentTab, RefEntry } from '../types';
 import { chapterTree } from '../chapterTree';
 import { plainTex } from '../latex';
 import { Math as Tex } from './Tex';
@@ -8,14 +8,23 @@ function chapterStmtCount(ch: Chapter): number {
   return ch.blocks.filter((b) => b.t === 'stmt').length;
 }
 
-export type ViewName = 'overview' | 'doc' | 'summary' | 'biblio' | 'graph';
+/** The built-in blueprint views. A project's own `site.tabs:` adds further
+ *  content views whose ids are arbitrary strings, so `ViewName` stays open —
+ *  the `(string & {})` keeps literal autocomplete for the built-ins while
+ *  admitting any custom tab id. */
+export type BuiltinView = 'overview' | 'doc' | 'summary' | 'biblio' | 'graph';
+export type ViewName = BuiltinView | (string & {});
 
-const NAV_LINKS: { view: ViewName; icon: string; label: string }[] = [
+const NAV_LINKS: { view: BuiltinView; icon: string; label: string }[] = [
   { view: 'overview', icon: '▤', label: 'Overview' },
   { view: 'summary', icon: '▣', label: 'Blueprint summary' },
   { view: 'biblio', icon: '❞', label: 'Blueprint bibliography' },
   { view: 'graph', icon: '◆', label: 'Dependency graph' },
 ];
+
+/** A custom tab's rail glyph: the config's `icon:` is used verbatim as a glyph/
+ *  emoji (keeping the built-in text-glyph style), with a neutral default. */
+const CUSTOM_TAB_ICON = '◈';
 
 export function Toc({
   chapters,
@@ -30,6 +39,7 @@ export function Toc({
   view,
   graphOpen,
   onSetView,
+  customTabs = [],
 }: {
   chapters: Chapter[];
   refs: Record<string, RefEntry>;
@@ -43,6 +53,7 @@ export function Toc({
   view: ViewName;
   graphOpen: boolean;
   onSetView: (v: ViewName) => void;
+  customTabs?: ContentTab[];
 }) {
   const [openCh, setOpenCh] = useState<Set<number>>(new Set());
 
@@ -80,6 +91,16 @@ export function Toc({
           >
             <span className="ni">{n.icon}</span>
             {n.label}
+          </a>
+        ))}
+        {customTabs.map((c) => (
+          <a
+            key={c.id}
+            className={`navlink${view === c.id ? ' on' : ''}`}
+            onClick={() => onSetView(c.id)}
+          >
+            <span className="ni">{c.icon || CUSTOM_TAB_ICON}</span>
+            {c.label}
           </a>
         ))}
       </div>

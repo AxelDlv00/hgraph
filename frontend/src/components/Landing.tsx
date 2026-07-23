@@ -1,25 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { SiteData } from '../types';
 import { themeFor } from '../theme';
-import { typesetMath } from '../typeset';
 import { ProjectCard } from './ProjectCard';
-
-/** The overview fragment, with its math typeset.
- *
- * The fragment is authored with `$…$` for KaTeX — an .html one written by hand
- * (Poincare-Conjecture's `scripts/gen_overview.py` says so in as many words) or
- * an .md one converted by `hgraph.site._md_to_html`, which leaves math alone on
- * purpose. Nothing ever ran KaTeX over it, so a landing page whose overview had
- * any math showed it as raw LaTeX. */
-function Overview({ html }: { html: string }) {
-  const ref = useRef<HTMLElement | null>(null);
-  // no deps — same React-19 innerHTML-reset caveat as Tex.tsx; typesetMath's
-  // guard makes the per-commit call O(1) when the fragment was left alone
-  useEffect(() => {
-    if (ref.current) typesetMath(ref.current);
-  });
-  return <section className="overview" ref={ref as never} dangerouslySetInnerHTML={{ __html: html }} />;
-}
+import { ContentPage } from './ContentPage';
 
 /** The workspace totals shown in the header — the same quantities a project's
  * own header shows, summed over every project on the page. */
@@ -33,11 +16,19 @@ function totals(data: SiteData) {
 export function Landing({ data }: { data: SiteData }) {
   const t = totals(data);
   const hasOverview = !!data.overviewHtml;
+  const contentTabs = data.tabs ?? [];
+  // The tab rail: always Projects, then the overview (if any), then whatever
+  // extra content tabs (People, Roadmap, …) the manifest's `tabs:` configured.
   // "Projects" is the default landing view — same rationale as ProjectView's
   // own `view` state defaulting to 'overview' there: whichever tab answers
-  // "what is this, concretely" belongs up front. Here that's the projects,
-  // not the prose. The overview is one click away, not inline after them.
-  const [tab, setTab] = useState<'projects' | 'overview'>('projects');
+  // "what is this, concretely" belongs up front. The rest are one click away.
+  const railTabs: { id: string; label: string }[] = [
+    { id: 'projects', label: 'Projects' },
+    ...(hasOverview ? [{ id: 'overview', label: 'Overview' }] : []),
+    ...contentTabs.map((c) => ({ id: c.id, label: c.label })),
+  ];
+  const [tab, setTab] = useState('projects');
+  const activeContentTab = contentTabs.find((c) => c.id === tab);
 
   return (
     <>
@@ -72,26 +63,24 @@ export function Landing({ data }: { data: SiteData }) {
           {data.subtitle && <p className="subtitle">{data.subtitle}</p>}
         </div>
 
-        {hasOverview && (
+        {railTabs.length > 1 && (
           <nav className="landing-tabs">
-            <a
-              className={`landing-tab${tab === 'projects' ? ' on' : ''}`}
-              onClick={() => setTab('projects')}
-            >
-              Projects
-            </a>
-            <a
-              className={`landing-tab${tab === 'overview' ? ' on' : ''}`}
-              onClick={() => setTab('overview')}
-            >
-              Overview
-            </a>
+            {railTabs.map((rt) => (
+              <a
+                key={rt.id}
+                className={`landing-tab${tab === rt.id ? ' on' : ''}`}
+                onClick={() => setTab(rt.id)}
+              >
+                {rt.label}
+              </a>
+            ))}
           </nav>
         )}
 
         {tab === 'projects' &&
           data.sections.map((section, i) => {
-            const theme = themeFor(i);
+            // a configured section/project theme wins; otherwise cycle the palette
+            const theme = section.theme ?? themeFor(i);
             return (
               <section className="section" key={section.category ?? `_${i}`}>
                 {section.category && (
@@ -105,14 +94,15 @@ export function Landing({ data }: { data: SiteData }) {
                 )}
                 <div className="card-grid">
                   {section.projects.map((p) => (
-                    <ProjectCard key={p.root} p={p} theme={theme} />
+                    <ProjectCard key={p.root} p={p} theme={p.theme ?? theme} />
                   ))}
                 </div>
               </section>
             );
           })}
 
-        {tab === 'overview' && hasOverview && <Overview html={data.overviewHtml!} />}
+        {tab === 'overview' && hasOverview && <ContentPage html={data.overviewHtml!} />}
+        {activeContentTab && <ContentPage html={activeContentTab.html} />}
 
         <footer
           className="footer"

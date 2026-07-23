@@ -231,6 +231,64 @@ reports each result separately. Before serving, `hgraph` checks each configured
 project without writing and warns when generated graph data does not match its
 sources, with the exact sync command to run.
 
+### Cross-project references
+
+Within a workspace, a blueprint can cite a statement in **another** project with
+`\citeext{Handle}{label}`, where `Handle` is the target project's `root`
+basename (`formalized-sources/DoCarmo` → `DoCarmo`), or an explicit `key:` set on
+its manifest entry. It renders like a normal cross-reference showing the target's
+number and project, e.g. *Thm 3.2 (Riemannian Geometry)*, and clicking it opens
+that project's blueprint at the cited statement. A bare `\citeext{Handle}` links
+to the project itself. The target's number is resolved when the workspace is
+built, so this only works across projects that share a workspace `config.yaml`.
+
+### Customization
+
+The interface is a configurable template — content and colors come from config,
+so no code change is needed to adapt a site to a project. All three knobs below
+work **globally** (in the workspace `config.yaml`) and **per project** (in a
+project's own `hgraph/config.yaml` under `site:`); a project's setting wins.
+
+**Extra landing-page tabs.** Add content tabs beside *Projects* / *Overview* —
+each a Markdown or HTML file, with math typeset in the browser:
+
+```yaml
+tabs:
+  - id: people
+    label: People
+    content: people.md    # .md is converted; .html is used verbatim
+```
+
+**Per-project colors.** Give a project an accent (its card gradient, pills, and
+its whole blueprint view recolor to match). Use the `accent:` shorthand — the
+tints are derived — or a full `theme:` block for exact control:
+
+```yaml
+projects:
+  - name: Project A
+    root: a
+    accent: '#B4530B'                       # shorthand — tints derived
+  - name: Project B
+    root: b
+    theme: { accent: '#058476', pillText: '#058476' }   # any subset; rest derived
+```
+
+**Custom blueprint tabs.** A project can add its own tabs to the blueprint view
+(beside Overview / Summary / Graph) from its `hgraph/config.yaml`:
+
+```yaml
+site:
+  tabs:
+    - id: people
+      label: People
+      icon: ★             # optional glyph for the rail
+      content: people.md
+```
+
+Custom tabs are static content pages today; the tab shape leaves room for
+interactive views later. Content is authored by the site owner and rendered as
+trusted HTML, the same as the overview and footer.
+
 Sync warnings are grouped by category and show at most three examples by
 default, so a project with hundreds of unresolved Lean references does not
 bury actual failures. Pass `hgraph sync --verbose` to show every warning.

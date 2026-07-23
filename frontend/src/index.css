@@ -1063,6 +1063,13 @@ details.stmt-detail > summary:hover { border-color: var(--accent); color: var(--
 .cite { color: var(--accent); cursor: pointer; white-space: nowrap; }
 .cite:hover { text-decoration: underline; }
 .xref { color: var(--muted); }
+/* cross-project `\citeext` link — like a ref, with a subtle ↗ so it reads as
+   "leaves this blueprint". `.extref-dead` is the unresolved fallback. */
+.extref { color: var(--accent); font-weight: 550; text-decoration: none; }
+.extref::after { content: "\2197"; font-size: 0.82em; margin-left: 1px; opacity: 0.7; }
+.extref:hover { text-decoration: underline; }
+.extref-dead { color: var(--muted); }
+.extref-dead::after { content: none; }
 .prose code, .sbody code, .stmt-body code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; background: var(--bg); padding: 1px 5px; border-radius: 5px; }
 
 details.proof { margin: 6px 0 16px; }

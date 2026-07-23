@@ -54,6 +54,45 @@ export function xref(labels: string, refs: Record<string, RefEntry>, bare = fals
     .join(', ');
 }
 
+/** A statement in *another* project, resolved to its number/abbr at build time
+ *  — the browser can't look it up, because the target's `refs` live in a sibling
+ *  project's data.json that this view never loads. See `\citeext`. */
+export interface ExtRefTarget {
+  num: string;
+  abbr: string;
+}
+export interface ExtProject {
+  root: string;
+  name: string;
+  /** only the labels this project actually cites: label -> {num, abbr} */
+  refs: Record<string, ExtRefTarget>;
+}
+
+// `extrefs` is project-global (like the KaTeX macros), so rather than thread it
+// through every component that renders prose we keep it in a module var the
+// `\citeext` rule reads, set once per project load (see ProjectView).
+let _extRefs: Record<string, ExtProject> = {};
+export function setExtRefs(m?: Record<string, ExtProject> | null): void {
+  _extRefs = m || {};
+}
+
+/** `\citeext{Handle}{label}` (and bare `\citeext{Handle}`) -> a cross-project
+ *  link rendered like a normal xref ("Thm 1.2 (Project name)"). Navigation is
+ *  the existing `#/<root>#<label>` hash contract, which App resolves on load, so
+ *  a plain `href` is all that is needed. An unknown handle (e.g. a solo
+ *  `hgraph serve` with no siblings) degrades to muted text. */
+export function extref(handle: string, label: string | null): string {
+  const proj = _extRefs[handle];
+  if (!proj) {
+    const shown = label ? `${esc(label.replace(/^[a-z]+:/, ''))} (${esc(handle)})` : `(${esc(handle)})`;
+    return `<span class="extref extref-dead">${shown}</span>`;
+  }
+  if (!label) return `<a class="extref" href="#/${proj.root}">(${esc(proj.name)})</a>`;
+  const t = proj.refs[label];
+  const text = t ? `${esc(t.abbr)}&nbsp;${esc(t.num)}` : esc(label.replace(/^[a-z]+:/, ''));
+  return `<a class="extref" href="#/${proj.root}#${encodeURIComponent(label)}">${text} (${esc(proj.name)})</a>`;
+}
+
 // Resolve text-formatting macros innermost-first so nested braces render, e.g.
 // \textit{Source: \texttt{Foo.Bar} in \texttt{A/B.lean}, L44--L440} -> all levels.
 function imRules(refs: Record<string, RefEntry>, cites: CiteNums): [RegExp, string | ((...a: string[]) => string)][] {
@@ -78,6 +117,10 @@ function imRules(refs: Record<string, RefEntry>, cites: CiteNums): [RegExp, stri
       (_m: string, a: string, b?: string) => xref(b ? `${a},${b}` : a, refs)],
     [/\\eqref\{([^{}]*)\}/g, (_m: string, a: string) => xref(a, refs, true)],
     [/\\ref\{([^{}]*)\}/g, (_m: string, a: string) => xref(a, refs)],
+    // cross-project cite. Two-arg form first so the bare-handle rule below only
+    // ever sees `\citeext{Handle}` with no label brace.
+    [/\\citeext\{([^{}]*)\}\{([^{}]*)\}/g, (_m: string, h: string, l: string) => extref(h.trim(), l.trim())],
+    [/\\citeext\{([^{}]*)\}/g, (_m: string, h: string) => extref(h.trim(), null)],
     [
       /\\cite[a-zA-Z]*\*?(?:\[[^\]]*\])?\{([^{}]*)\}/g,
       (_m: string, a: string) =>

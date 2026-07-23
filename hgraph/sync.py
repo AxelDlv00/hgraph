@@ -46,6 +46,10 @@ def load_config(root: str | Path) -> dict:
           subtitle: ...
           overview: overview.md
           repo: owner/name
+          accent: '#B4530B'          # this project's colour (or a full theme:);
+                                      # applies to its card + blueprint view
+          tabs:                      # extra content tabs on its blueprint view
+            - {id: people, label: People, content: people.md}
 
     Returns ``{"blueprint": <abs path or None>, "lean": [<abs path>, ...],
     "site": <the site: block, verbatim, or {}>}``.

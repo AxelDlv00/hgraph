@@ -2,8 +2,8 @@
 
 There is no separate per-project "dashboard" artifact: one project or many,
 it's all one app. Reads a small YAML manifest describing the project(s),
-computes each one's formalization progress (reusing
-:class:`~hgraph.analysis.Analysis`), and either:
+computes each one's formalization progress (see :func:`project_progress`), and
+either:
 
 * writes a static ``index.html`` + a sibling ``assets/`` dir — the pre-built
   frontend at :data:`WEBUI_DIR` (shipped with the package, no Node needed) —
@@ -39,6 +39,15 @@ Manifest schema (paths are resolved relative to the manifest file)::
                                       # URI, or an emoji (🌀) drawn onto an SVG
     overview: overview.md            # optional fragment injected below the hero
                                       # (.md is converted; .html is used verbatim)
+    tabs:                            # optional — extra content tabs on the landing
+      - id: people                   # page, beside Projects/Overview. Each names a
+        label: People                # .md/.html file (converted like `overview:`)
+        content: people.md           # and is KaTeX-typeset in the browser.
+    theme:                           # optional — the default project colours for the
+      accent: '#4938D1'              # whole workspace. Either an `accent:` (all six
+                                      # tints derived) or a full six-field block:
+                                      # accent, accentDark, gradientFrom, gradientTo,
+                                      # pillBg, pillText. A project may override it.
     repo: owner/name                 # optional — the default `repo:` for every
                                       # project below that does not set its own.
                                       # Projects of one monorepo share it rather
@@ -76,6 +85,13 @@ Manifest schema (paths are resolved relative to the manifest file)::
                                       # portrait picture, landscape panel)
         links: [{label: Formalization, href: ...}, {label: Docs, href: ...}]
         blurb: Foundations — metrics, curvature, comparison geometry.
+        accent: '#B4530B'            # optional — this project's colour (shorthand;
+                                      # tints derived). Overrides the page `theme:`.
+        theme: {gradientFrom: '#FBF0E6', pillText: '#B4530B'}  # optional — full
+                                      # control; any subset, missing fields derived.
+                                      # (A project's own hgraph/config.yaml -> site:
+                                      # may set accent/theme instead; a manifest
+                                      # entry here wins over it.)
         repo: owner/name             # optional — enables the GitHub-issue review link.
                                       # Defaults to the page-level `repo:` above;
                                       # set it only where a project lives in its
@@ -101,12 +117,23 @@ one card (paths are relative to the project root)::
                                  # then the title shows twice, which reads as a
                                  # stutter — give the card a different name
       tag: 495 statements        # and any of: author, book_title, icon, blurb,
-      icon: book                 # links, image, image_alt, image_offset, image_fit
+      icon: book                 # links, image, image_alt, image_offset, image_fit,
+      accent: '#B4530B'          # accent/theme (this project's colours — landing
+                                 # card + blueprint view), and:
+      tabs:                      # extra tabs on *this project's blueprint view*
+        - id: people             # (People, Roadmap, …), beside Overview/Summary/
+          label: People          # Graph. Each names a .md/.html file relative to
+          content: people.md     # the project root; icon: is an optional glyph.
+
+Per-project colours and blueprint tabs work the same in a workspace: set
+``accent:``/``theme:`` and ``site.tabs:`` in a project's own
+``hgraph/config.yaml``, and they apply wherever that project is shown.
 """
 
 from __future__ import annotations
 
 import base64
+import colorsys
 import html
 import json
 import mimetypes
@@ -117,8 +144,7 @@ from pathlib import Path
 
 import yaml
 
-from .analysis import Analysis
-from .graph import Graph, HGraphError
+from .graph import HGraphError
 
 _DONE = {"lean_ok", "mathlib_ok"}
 
@@ -224,21 +250,52 @@ def _read_overview(path: str | Path) -> str:
     return _md_to_html(text) if path.suffix == ".md" else text
 
 
+# The landing cards' progress bars need only each `tex` node's `lean_status`.
+# Reading that straight from the frontmatter — two line-anchored scalars — is
+# ~6x faster than routing every node through `Graph.nodes()`, which reads each
+# file *and* full-parses its YAML header and body. On a big workspace (tens of
+# thousands of node files) that is the difference between a landing page that
+# rebuilds in well under a second and one that takes several. hgraph's own
+# writer emits these as plain block scalars (`yaml.safe_dump`, sorted keys, one
+# per line), so the match is exact; the value is dequoted defensively for a
+# hand-edited file. Anything more structured still goes through `Graph`.
+_TEX_TYPE_RE = re.compile(r"^type:[ \t]*(.+?)[ \t]*$", re.M)
+_LEAN_STATUS_RE = re.compile(r"^lean_status:[ \t]*(.+?)[ \t]*$", re.M)
+
+
+def _fm_scalar(s: str) -> str:
+    return s.strip().strip("'\"")
+
+
 def project_progress(root: str | Path) -> dict:
-    """Open the hgraph project at ``root`` and summarise its progress over the
-    blueprint (``tex``) statements — the same quantity the dashboard bars show."""
-    g = Graph.open(str(root))
-    tex = list(g.nodes(type="tex"))
-    done = sum(1 for n in tex if n.meta.get("lean_status") in _DONE)
-    partial = sum(1 for n in tex if n.meta.get("lean_status") == "sorry")
-    total = len(tex)
+    """Summarise a project's progress over its blueprint (``tex``) statements —
+    the same quantity the dashboard bars show — reading each node's status
+    directly from frontmatter (see the note above :data:`_TEX_TYPE_RE`)."""
+    nodes_dir = Path(root) / "hgraph" / "nodes"
+    total = done = partial = 0
+    if nodes_dir.exists():
+        for p in nodes_dir.glob("*.md"):
+            text = p.read_text(encoding="utf-8")
+            if not text.startswith("---\n"):
+                continue
+            end = text.find("\n---\n", 4)
+            head = text[4:end] if end != -1 else text[4:]
+            tm = _TEX_TYPE_RE.search(head)
+            if not tm or _fm_scalar(tm.group(1)) != "tex":
+                continue
+            total += 1
+            sm = _LEAN_STATUS_RE.search(head)
+            status = _fm_scalar(sm.group(1)) if sm else None
+            if status in _DONE:
+                done += 1
+            elif status == "sorry":
+                partial += 1
     return {
         "statements": total,
         "done": done,
         "partial": partial,
         "todo": total - done - partial,
         "pct": round(100 * done / total) if total else 0,
-        "closed": Analysis(g).state_counts().get("closed", 0),
     }
 
 
@@ -462,6 +519,155 @@ def _category_subtitles(value) -> dict[str, str]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Per-project / global colours (the `theme:` / `accent:` config)
+# --------------------------------------------------------------------------- #
+# The frontend's `theme.ts` defines a `Theme` as six colours; when nothing is
+# configured it cycles a hand-tuned palette per section (`themeFor`). Here we
+# let a manifest set a project's colours explicitly instead: either the full
+# six-field `theme:` block, or a single `accent:` from which the tints below are
+# derived — so the whole card/pill/gradient set stays in harmony from one value.
+# Deriving here (not in TS) keeps one source of truth: the static export and
+# `hgraph serve` cannot disagree, and a project's blueprint view reads the same
+# accent as its landing card.
+_THEME_KEYS = ("accent", "accentDark", "gradientFrom", "gradientTo", "pillBg", "pillText")
+_HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _norm_hex(value) -> str:
+    """Validate a `#rgb`/`#rrggbb` colour and return it as lowercase `#rrggbb`."""
+    s = str(value).strip()
+    if not _HEX_RE.match(s):
+        raise HGraphError(f"theme colour must be a hex value like '#4938D1', not {value!r}")
+    if len(s) == 4:                       # #rgb -> #rrggbb
+        s = "#" + "".join(c * 2 for c in s[1:])
+    return s.lower()
+
+
+def _tint(hex_color: str, *, light: float | None = None, sat: float | None = None,
+          dl: float = 0.0, dh: float = 0.0) -> str:
+    """Return ``hex_color`` adjusted in HLS space: set an absolute ``light``/
+    ``sat`` in [0,1], and/or nudge lightness by ``dl`` and hue by ``dh`` degrees.
+    Hue is preserved unless ``dh`` is given — a small ``dh`` is what turns a flat
+    same-hue pair into a gradient that actually reads as one (see the two-tone
+    gradient in :func:`_derive_theme`)."""
+    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    h = (h + dh / 360.0) % 1.0
+    l = light if light is not None else max(0.0, min(1.0, l + dl))
+    s = sat if sat is not None else s
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return "#{:02x}{:02x}{:02x}".format(round(r * 255), round(g * 255), round(b * 255))
+
+
+def _derive_theme(accent) -> dict:
+    """A full six-field theme derived from a single accent — a dark accent for
+    hover/borders and near-white tints for gradients and pills. Mirrors the
+    shape (and the light, low-saturation feel) of `theme.ts`'s hand-tuned
+    `THEMES`, so a derived theme sits happily beside a cycled one."""
+    accent = _norm_hex(accent)
+    # `gradientTo` drifts ~28° off the accent hue so the panel reads as a real
+    # two-tone gradient, not a flat wash; `gradientFrom` stays on-hue and doubles
+    # as the pill background. Mirrors the hand-tuned pairs in `theme.ts`.
+    return {
+        "accent": accent,
+        "accentDark": _tint(accent, dl=-0.12),
+        "gradientFrom": _tint(accent, light=0.94, sat=0.60),
+        "gradientTo": _tint(accent, light=0.95, sat=0.52, dh=28),
+        "pillBg": _tint(accent, light=0.94, sat=0.60),
+        "pillText": accent,
+    }
+
+
+def _theme_of(source: dict) -> dict:
+    """The `theme:`/`accent:` a single config source declares, as a partial
+    theme dict (only the fields it actually sets). Accepts the full `theme:`
+    block, the `accent:` shorthand, or both (explicit `theme:` fields win)."""
+    out: dict = {}
+    accent = source.get("accent")
+    block = source.get("theme")
+    if isinstance(block, dict):
+        accent = block.get("accent", accent)
+    if accent is not None:
+        out["accent"] = _norm_hex(accent)
+    if isinstance(block, dict):
+        for k in _THEME_KEYS:
+            if block.get(k) is not None:
+                out[k] = _norm_hex(block[k])
+    elif block is not None:
+        raise HGraphError(f"theme: must be a mapping of colour fields, not {type(block).__name__}")
+    return out
+
+
+def _resolve_theme(project: dict, manifest: dict, base: Path) -> dict | None:
+    """The resolved six-field theme for one project, or ``None`` when nothing is
+    configured (so the frontend falls back to its per-section cycled palette).
+
+    Precedence, most specific first: the manifest project entry, then the
+    project's own ``hgraph/config.yaml`` ``site:`` block, then the manifest-level
+    global default. A source's ``accent:`` seeds all six derived tints; explicit
+    ``theme:`` fields then override, field by field, with the more specific
+    source winning."""
+    own: dict = {}
+    try:
+        from .sync import load_config
+        own = load_config(base / project["root"]).get("site") or {}
+    except Exception:
+        own = {}
+    sources = [project, own, manifest]        # most specific -> least specific
+    partials = [_theme_of(s) for s in sources]
+
+    accent = next((p["accent"] for p in partials if "accent" in p), None)
+    if accent is None:
+        # a source may still pin individual tints without an accent; if not even
+        # that, there is nothing configured and the frontend cycles its palette.
+        if not any(partials):
+            return None
+        accent = "#4938d1"                    # neutral base for the tints below
+    theme = _derive_theme(accent)
+    for partial in reversed(partials):        # least specific first -> specific wins
+        theme.update(partial)
+    return theme
+
+
+def _content_tabs(entries, *, base: Path, where: str) -> list[dict]:
+    """Normalise a ``tabs:`` list into ``[{id, label, icon?, html}]`` — the extra
+    content pages the landing page and a project's blueprint view can carry.
+
+    Each entry names a ``content:`` file (``.md`` is converted, ``.html`` is used
+    verbatim — the same rule as ``overview:``, via :func:`_read_overview`) and is
+    KaTeX-typeset in the browser. A missing file warns and is skipped, matching
+    ``_card_image``; a malformed entry is a hard error. ``icon:`` is optional and
+    only meaningful for blueprint tabs (the landing tab rail is text-only)."""
+    if not entries:
+        return []
+    if not isinstance(entries, list):
+        raise HGraphError(f"{where} tabs: must be a list of {{id, label, content}} entries")
+    out: list[dict] = []
+    for i, t in enumerate(entries):
+        if not isinstance(t, dict):
+            raise HGraphError(f"{where} tabs[{i}] must be a mapping")
+        tid, label, content = t.get("id"), t.get("label"), t.get("content")
+        if not tid or not label:
+            raise HGraphError(f"{where} tabs[{i}] needs both id: and label:")
+        if not content:
+            raise HGraphError(f"{where} tab {tid!r} needs a content: file")
+        path = base / content
+        if not path.exists():
+            print(f"warning: {where} tab {tid!r} content not found, ignoring: {path}")
+            continue
+        tab = {"id": str(tid), "label": str(label), "html": _read_overview(path)}
+        if t.get("icon"):
+            tab["icon"] = str(t["icon"])
+        out.append(tab)
+    return out
+
+
+def _landing_tabs(manifest: dict, base: Path) -> list[dict]:
+    """The workspace-level custom tabs shown beside Projects/Overview."""
+    return _content_tabs(manifest.get("tabs"), base=base, where="manifest")
+
+
 def build_site_data(manifest: dict, *, base: Path, overview_html: str | None = None) -> dict:
     """Compute the JSON-able site data — matches ``frontend/src/types.ts``'s
     ``SiteData``. Used for both the static export (embedded as
@@ -494,6 +700,7 @@ def build_site_data(manifest: dict, *, base: Path, overview_html: str | None = N
             "imageOffset": _card_offset(p.get("image_offset")),
             "imageFit": _card_fit(p.get("image_fit")),
             "blurb": p.get("blurb"),
+            "theme": _resolve_theme(p, manifest, base),
             "stats": {k: prog[k] for k in ("statements", "done", "partial", "todo", "pct")},
         }
         groups.setdefault(p.get("category"), []).append(card)
@@ -503,13 +710,20 @@ def build_site_data(manifest: dict, *, base: Path, overview_html: str | None = N
     for cat in sorted(unused):
         print(f"warning: categories: {cat!r} matches no project's category: — ignored")
 
+    # a section's own accent (its heading underline) follows its first project
+    # that pins a theme; with none, the frontend cycles its palette per section.
+    def _section_theme(cards):
+        return next((c["theme"] for c in cards if c.get("theme")), None)
+
     return {
         "title": manifest.get("title", "Blueprint projects"),
         "subtitle": manifest.get("subtitle"),
         "brand": manifest.get("brand"),
         "overviewHtml": ov,
+        "tabs": _landing_tabs(manifest, base),
         "footer": manifest.get("footer"),
-        "sections": [{"category": cat, "subtitle": subs.get(cat), "projects": cards}
+        "sections": [{"category": cat, "subtitle": subs.get(cat),
+                      "theme": _section_theme(cards), "projects": cards}
                      for cat, cards in groups.items()],
     }
 
@@ -554,6 +768,49 @@ def _copy_webui(out_dir: Path) -> None:
             shutil.copy2(src, dst)
 
 
+def _project_handle(entry: dict) -> str:
+    """The short name a ``\\citeext{...}`` refers a project by: the manifest
+    entry's ``key:`` if set, else its ``root``'s basename (``formalized-sources/
+    DoCarmo`` -> ``DoCarmo``) — already unique across a workspace."""
+    return str(entry.get("key") or Path(str(entry["root"]).strip("/")).name)
+
+
+def _extref_index_from(entries_data: list) -> dict:
+    """Build the cross-project ``{handle: {"root", "name", "refs"}}`` index from
+    already-computed ``(manifest_entry, project_data)`` pairs — the label→number
+    table a ``\\citeext`` resolves against. Reuses each project's own ``refs`` so
+    nothing is parsed twice."""
+    index = {}
+    for p, data in entries_data:
+        root = str(p["root"]).strip("/")
+        index[_project_handle(p)] = {
+            "root": root, "name": p.get("name", root), "refs": data.get("refs") or {}}
+    return index
+
+
+def build_extref_index(manifest: dict, base: Path) -> dict:
+    """The same index, computed from scratch (for the live server, where each
+    project's data is cached separately). Uses ``build_document`` — the blueprint
+    parse only, no Graphviz — so it is much cheaper than a full ``project_data``
+    per project."""
+    from .dashboard import build_document, _resolve_blueprint
+    from .graph import Graph
+    index = {}
+    for p in manifest.get("projects", []):
+        root = str(p["root"]).strip("/")
+        name = p.get("name", root)
+        refs = {}
+        try:
+            bp = _resolve_blueprint(None, str(base / p["root"]))
+            if bp:
+                refs = build_document(Graph.open(str(base / p["root"])), bp,
+                                      title=name).get("refs", {})
+        except Exception:
+            refs = {}
+        index[_project_handle(p)] = {"root": root, "name": name, "refs": refs}
+    return index
+
+
 def write_static_site(manifest: dict, *, base: Path, out_path: str | Path,
                       overview_html: str | None = None) -> None:
     """Write the whole site as static files: ``out_path`` (an ``index.html``)
@@ -563,7 +820,7 @@ def write_static_site(manifest: dict, *, base: Path, out_path: str | Path,
     :func:`hgraph.dashboard.project_data`) — everything the React
     `ProjectView` route needs, fetched relative to wherever the page is
     served from, no server required."""
-    from .dashboard import project_data
+    from .dashboard import project_data, resolve_extrefs
     from .graph import Graph
 
     out_path = Path(out_path)
@@ -571,10 +828,20 @@ def write_static_site(manifest: dict, *, base: Path, out_path: str | Path,
     out_dir.mkdir(parents=True, exist_ok=True)
     _copy_webui(out_dir)
 
+    # First compute every project's payload (which holds its `refs`), then build
+    # the cross-project index from those and resolve each project's `\citeext`s
+    # against it — so a citation into a sibling can show that sibling's number.
+    payloads = []
     for p in manifest.get("projects", []):
         proot = base / p["root"]
         data = project_data(Graph.open(str(proot)), title=p.get("name", p["root"]),
-                            root=str(proot), repo=p.get("repo") or manifest.get("repo"))
+                            root=str(proot), repo=p.get("repo") or manifest.get("repo"),
+                            theme=_resolve_theme(p, manifest, base))
+        payloads.append((p, data))
+
+    index = _extref_index_from(payloads)
+    for p, data in payloads:
+        data["extrefs"] = resolve_extrefs(data.get("chapters"), index)
         data_dir = out_dir / str(p["root"]).strip("/")
         data_dir.mkdir(parents=True, exist_ok=True)
         (data_dir / "data.json").write_text(
@@ -599,7 +866,7 @@ def write_from_manifest(manifest_path: str | Path, *, out_path: str | Path,
 # synthesized, and `title`/`subtitle`/`overview`/`repo` belong to the page
 # rather than the card, so they are handled separately in write_solo.
 _SOLO_CARD_KEYS = ("card_title", "author", "book_title", "tag", "icon", "blurb", "links",
-                   "image", "image_alt", "image_offset", "image_fit")
+                   "image", "image_alt", "image_offset", "image_fit", "accent", "theme")
 
 
 def solo_manifest(site_cfg: dict, *, title: str = "Blueprint", repo=None) -> dict:

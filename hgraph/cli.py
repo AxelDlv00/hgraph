@@ -229,6 +229,36 @@ def _warn_sync_preflight(statuses: list[dict], *, command: str,
     print(f"  {action} `{command}` before serving.", file=sys.stderr)
 
 
+# The most recent serve preflight thread. Serving blocks the main thread, so
+# nothing in-process ever needs this — but the tests mock the server away and
+# then await this to observe the (now backgrounded) warning output.
+_LAST_SERVE_PREFLIGHT = None
+
+
+def _warn_sync_preflight_async(statuses_fn, *, command: str, verbose: bool = False):
+    """Run the ``serve`` staleness check off the critical path.
+
+    The check re-syncs every project in memory to spot on-disk data that has
+    drifted from its sources — seconds of work on a large workspace — but it
+    only *warns*; serving proceeds regardless. Running it inline meant the
+    server did not bind until it finished, so a big workspace felt slow to
+    start. In a daemon thread instead, the server comes up immediately and the
+    warnings (if any) print a moment later, to the same stderr."""
+    import threading
+
+    def run():
+        try:
+            _warn_sync_preflight(statuses_fn(), command=command, verbose=verbose)
+        except Exception:
+            pass   # a check that itself blows up must never take the server down
+
+    global _LAST_SERVE_PREFLIGHT
+    th = threading.Thread(target=run, daemon=True)
+    _LAST_SERVE_PREFLIGHT = th
+    th.start()
+    return th
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="hgraph", description="a plain-files semantic graph")
     p.add_argument("--root", default=".", help="project dir containing hgraph/ (default: .)")
@@ -712,9 +742,9 @@ def main(argv=None) -> int:
                            else (f"hgraph --root {shlex.quote(str(root))} sync"
                                  if str(root) != "."
                                  else "hgraph sync"))
-                _warn_sync_preflight(
-                    workspace_sync_status(manifest, workspace.parent), command=command,
-                    verbose=args.verbose)
+                _warn_sync_preflight_async(
+                    lambda: workspace_sync_status(manifest, workspace.parent),
+                    command=command, verbose=args.verbose)
                 serve_workspace(manifest, workspace.parent, host=args.host, port=args.port)
             elif not (root / "hgraph").is_dir():
                 # Neither a workspace nor a project. `Graph.open` is happy to
@@ -734,15 +764,15 @@ def main(argv=None) -> int:
                 from .server import serve
                 command = (f"hgraph --root {shlex.quote(str(root))} sync"
                            if str(root) != "." else "hgraph sync")
-                status = project_sync_status(root)
                 try:
                     project_name = (load_config(args.root).get("site", {}).get("title")
                                     or root.name)
                 except Exception:
                     project_name = root.name
-                _warn_sync_preflight([
-                    {"name": project_name, "root": str(root), **status}
-                ], command=command, verbose=args.verbose)
+                _warn_sync_preflight_async(
+                    lambda: [{"name": project_name, "root": str(root),
+                              **project_sync_status(root)}],
+                    command=command, verbose=args.verbose)
                 serve(g, host=args.host, port=args.port, title=args.title,
                       macros_from=args.macros, root=args.root, repo=args.repo)
 

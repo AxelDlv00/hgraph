@@ -9,7 +9,8 @@ import { HoverPreview } from './HoverPreview';
 import { GraphModal } from './GraphModal';
 import { Summary } from './Summary';
 import { Bibliography } from './Bibliography';
-import { citeNums, plainTex } from '../latex';
+import { ContentPage } from './ContentPage';
+import { citeNums, plainTex, setExtRefs } from '../latex';
 import { setDefaultMacros } from '../typeset';
 import {
   Network,
@@ -87,10 +88,12 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
   const [rightPanelOpen, toggleRightPanel] = useStoredPanelState('hgraph:blueprint:right-panel');
 
   // project macros apply to every typeset on the page, including titles that
-  // don't thread a macros prop (TOC, overview, summary, bibliography)
+  // don't thread a macros prop (TOC, overview, summary, bibliography); the
+  // cross-project `\citeext` targets are project-global the same way.
   useEffect(() => {
     setDefaultMacros(data?.macros);
-    return () => setDefaultMacros(null);
+    setExtRefs(data?.extrefs);
+    return () => { setDefaultMacros(null); setExtRefs(null); };
   }, [data]);
 
   useEffect(() => {
@@ -323,9 +326,17 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
   if (!data) return <div className="page-loading">Loading…</div>;
 
   const showResults = view === 'doc' && !!filtered;
+  const customTabs = data.customTabs ?? [];
+  const activeCustom = customTabs.find((c) => c.id === view);
+  // a project's configured accent recolours its whole blueprint view — every
+  // accent in index.css reads `var(--accent)`, so overriding it here on the
+  // page root cascades to nav, chapters, pills and hovers in one line.
+  const accentStyle = data.theme
+    ? ({ '--accent': data.theme.accent } as React.CSSProperties)
+    : undefined;
 
   return (
-    <div className="project-page">
+    <div className="project-page" style={accentStyle}>
       {/* while the graph modal is open, clicks in its pinned mini-graph popup
           must select within the modal, not silently change the doc view behind it */}
       <HoverPreview data={data} root={root} onNavigate={graphOpen ? setGraphSelectedId : navigate} />
@@ -411,10 +422,13 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
           view={view}
           graphOpen={graphOpen}
           onSetView={onSetView}
+          customTabs={customTabs}
         />
 
         <main className="doc-main">
-          {view === 'summary' ? (
+          {activeCustom ? (
+            <ContentPage html={activeCustom.html} className="doc" />
+          ) : view === 'summary' ? (
             <Summary entries={data.entries} chapters={chapters} refs={refs} onSelect={navigate} onGotoChapter={gotoChapter} />
           ) : view === 'biblio' ? (
             <Bibliography bib={data.bib} chapters={chapters} onGotoLoc={gotoLoc} flashKey={flashBibKey} />

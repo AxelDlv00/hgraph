@@ -7,6 +7,10 @@ subtitle: A plain-files semantic graph for autoformalization — two small worke
 tab_title: hgraph examples   # the browser-tab <title>; falls back to brand, then title
 favicon: 🕸️             # the tab icon: a path (inlined), a URL/data URI, or an emoji
 overview: overview.md
+tabs:                    # optional extra landing tabs, beside Projects/Overview.
+  - id: people           # each is a markdown or html file, KaTeX-typeset in the
+    label: People        # browser — add People, Roadmap, Acknowledgements, …
+    content: people.md
 projects:
   - name: Gauss summation
     root: examples/gauss
@@ -20,6 +24,8 @@ projects:
     blurb: The blueprint + Lean sources are the reference; sync parses them, then a human/agent layers on provenance, comments, and reviews.
   - name: Triangular numbers
     root: examples/triangular
+    accent: '#058476'    # a workspace-curated colour (shorthand — tints derived);
+                          # gauss instead sets its own accent in its project config
     category: Schema reference
     tag: full schema
     blurb: Every content_type, a wide origin spread, a stale-node demo, a related_to edge, and the two-axis Maths/Lean review shape.

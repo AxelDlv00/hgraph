@@ -9,9 +9,18 @@ from unittest import mock
 
 import yaml
 
+import hgraph.cli as cli
 from hgraph.cli import main
 from hgraph.graph import Graph, node_id
 from hgraph.sync import project_sync_status, sync_from_config
+
+
+def _await_serve_preflight() -> None:
+    """`hgraph serve` runs its staleness check in a daemon thread so the server
+    binds immediately; join it so the warning output is complete before asserting."""
+    th = cli._LAST_SERVE_PREFLIGHT
+    if th is not None:
+        th.join(timeout=10)
 
 
 BLUEPRINT = r"""
@@ -97,6 +106,7 @@ class WorkspaceSyncTests(unittest.TestCase):
             with mock.patch("hgraph.server.serve_workspace") as serve, \
                     contextlib.redirect_stderr(stderr):
                 code = main(["--root", str(workspace), "serve"])
+                _await_serve_preflight()
 
             self.assertEqual(code, 0)
             serve.assert_called_once()
@@ -130,6 +140,7 @@ class WorkspaceSyncTests(unittest.TestCase):
             preflight = io.StringIO()
             with mock.patch("hgraph.server.serve"), contextlib.redirect_stderr(preflight):
                 main(["--root", str(root), "serve"])
+                _await_serve_preflight()
             self.assertIn("5 Lean references not found in scanned sources",
                           preflight.getvalue())
             self.assertNotIn("Missing.four", preflight.getvalue())

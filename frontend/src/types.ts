@@ -3,9 +3,23 @@
 // (live, fetched from /api/site / <root>/data.json) — either way the same
 // shape, so components don't care which mode they're running in.
 
+import type { Theme } from './theme';
+
 export interface CardLink {
   label: string;
   href: string;
+}
+
+/** A static content page (markdown/HTML resolved server-side to `html`, then
+ *  KaTeX-typeset in the browser). Powers both the landing page's custom tabs
+ *  (`SiteData.tabs`) and a project blueprint's custom tabs (`ProjectData
+ *  .customTabs`). `icon` is only used by the blueprint tab rail. */
+export interface ContentTab {
+  id: string;
+  label: string;
+  /** lucide-react icon name (blueprint tabs only); a default glyph if unset */
+  icon?: string;
+  html: string;
 }
 
 export interface ProjectStats {
@@ -45,6 +59,9 @@ export interface ProjectCardData {
    *  while the panel is landscape, so cropping would show only a band of it. */
   imageFit?: 'cover' | 'contain';
   blurb?: string;
+  /** resolved colours from the manifest's `theme:`/`accent:`; null → the
+   *  frontend falls back to its per-section cycled palette (`themeFor`) */
+  theme?: Theme | null;
   stats: ProjectStats;
 }
 
@@ -52,6 +69,8 @@ export interface Section {
   category: string | null;
   /** optional line under the category heading — the manifest's `categories:` */
   subtitle?: string | null;
+  /** the section's accent (heading underline etc.); null → cycled palette */
+  theme?: Theme | null;
   projects: ProjectCardData[];
 }
 
@@ -60,6 +79,8 @@ export interface SiteData {
   subtitle?: string;
   brand?: string;
   overviewHtml?: string;
+  /** extra content tabs on the landing page — the manifest's `tabs:` */
+  tabs?: ContentTab[];
   footer?: string;
   sections: Section[];
 }
@@ -192,9 +213,9 @@ export interface Chapter {
 /** what `\ref`/`\cref`/`\eqref` resolve a `\label` to — see latex.ts, which
  *  owns the canonical definition (statements carry a node `id`; chapters,
  *  sections and equations carry a `ch` + `anchor` scroll target instead) */
-import type { RefEntry } from './latex';
+import type { RefEntry, ExtProject, ExtRefTarget } from './latex';
 
-export type { RefEntry };
+export type { RefEntry, ExtProject, ExtRefTarget };
 
 export interface BibEntry {
   key: string;
@@ -217,12 +238,21 @@ export interface ProjectData {
   entries: Entry[];
   chapters?: Chapter[];
   refs?: Record<string, RefEntry>;
+  /** cross-project `\citeext` targets, keyed by project handle — resolved at
+   *  build time so a citation into a sibling can show that sibling's number */
+  extrefs?: Record<string, ExtProject>;
   loc?: Record<string, number>;
   bib: BibEntry[];
   docTitle?: string;
   docAuthor?: string;
   macros: Record<string, string>;
   repo: string | null;
+  /** resolved colours for this project (its `theme:`/`accent:`); null → the
+   *  blueprint view keeps the default accent */
+  theme?: Theme | null;
+  /** static content tabs added to the blueprint rail — the project's
+   *  `hgraph/config.yaml` -> `site.tabs:` */
+  customTabs?: ContentTab[];
   gvsvg?: Record<string, string>;
 }
 

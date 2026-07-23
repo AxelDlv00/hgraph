@@ -308,6 +308,44 @@ def build_document(g: Graph, blueprint: str | Path, *, title: str) -> dict:
             "entries": graph_entries, "refs": refs, "loc": loc}
 
 
+# `\citeext{Handle}{label}` (cross-project cite) or bare `\citeext{Handle}`. The
+# second brace group is optional; unlike the leanblueprint macros it survives
+# into the body verbatim and is rendered client-side (see frontend/src/latex.ts),
+# exactly like `\ref`/`\cite`. Here we only pre-resolve the *target numbers*,
+# which live in another project and so cannot be looked up in the browser.
+_CITEEXT_RE = re.compile(r"\\citeext\{([^{}]*)\}(?:\{([^{}]*)\})?")
+
+
+def resolve_extrefs(chapters, index: dict) -> dict:
+    """Resolve every ``\\citeext{handle}{label}`` in a document's prose against a
+    cross-project ``index`` (``{handle: {"root", "name", "refs"}}``), returning
+    the ``extrefs`` payload the frontend renders from::
+
+        {handle: {"root", "name", "refs": {label: {"num", "abbr"}}}}
+
+    Only the handles and labels actually cited are included, so the map a project
+    ships stays small. An unknown handle is skipped (the frontend then renders the
+    citation as muted text); a known handle with an unresolved label still ships
+    its ``root``/``name`` so the link works, just without a number."""
+    out: dict = {}
+    for ch in chapters or []:
+        for b in ch.get("blocks", []):
+            text = " ".join(s for s in (b.get("tex"), b.get("body"), b.get("title")) if s)
+            for m in _CITEEXT_RE.finditer(text):
+                handle = (m.group(1) or "").strip()
+                label = (m.group(2) or "").strip()
+                proj = index.get(handle)
+                if not proj:
+                    continue
+                entry = out.setdefault(
+                    handle, {"root": proj["root"], "name": proj["name"], "refs": {}})
+                if label:
+                    r = (proj.get("refs") or {}).get(label)
+                    if r:
+                        entry["refs"][label] = {"num": r["num"], "abbr": r["abbr"]}
+    return out
+
+
 def _resolve_blueprint(blueprint, root):
     if blueprint and Path(blueprint).exists():
         return blueprint
@@ -341,7 +379,7 @@ def _resolve_repo(repo, root):
 
 
 def project_data(g: Graph, *, title: str, blueprint=None, macros_from=None,
-                 root: str = ".", repo=None) -> dict:
+                 root: str = ".", repo=None, theme: dict | None = None) -> dict:
     """One project's full data payload — everything the React `ProjectView`
     needs: the numbered document (chapters/prose/cross-refs) if a blueprint
     is configured, else a flat statement list; entries (statements + Lean +
@@ -358,16 +396,22 @@ def project_data(g: Graph, *, title: str, blueprint=None, macros_from=None,
     same way `hgraph frontier`/`hgraph stats` compute it independently via
     their own `Analysis(g)` call."""
     from .layout import render_svgs
+    from .site import _content_tabs
 
     bp = _resolve_blueprint(blueprint, root)
     data = build_document(g, bp, title=title) if bp else {**collect(g, title=title), "mode": "list"}
     ta = discover_titleauthor(bp) if bp else {}
+    # a project's own `hgraph/config.yaml` -> `site.tabs:` adds static content
+    # tabs to its blueprint view (People, Roadmap, …), beside overview/graph.
+    site_cfg = load_config(root).get("site") or {}
     data.update({
         "bib": discover_bib(bp) if bp else [],
         "docTitle": ta.get("title") or title,
         "docAuthor": ta.get("author"),
         "macros": resolve_macros(bp, macros_from),
         "repo": _resolve_repo(repo, root),
+        "theme": theme,
+        "customTabs": _content_tabs(site_cfg.get("tabs"), base=Path(root), where="project"),
         "gvsvg": render_svgs(data),
     })
     return data

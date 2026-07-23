@@ -25,9 +25,10 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .dashboard import _resolve_blueprint, project_data
+from .dashboard import _resolve_blueprint, project_data, resolve_extrefs
 from .graph import Graph
-from .site import WEBUI_DIR, build_site_data, render_index_html
+from .site import (WEBUI_DIR, build_extref_index, build_site_data,
+                   render_index_html, _resolve_theme)
 
 
 def _tree_sig(*paths: Path | str | None) -> tuple:
@@ -188,6 +189,7 @@ def serve(g: Graph, *, host: str = "127.0.0.1", port: int = 8000,
     # overview + a click into the project view, not skipped straight to content.
     site_cfg = load_config(root).get("site") or {}
     manifest = solo_manifest(site_cfg, title=title, repo=repo)
+    solo_theme = _resolve_theme(manifest["projects"][0], manifest, Path(root))
     site_title = manifest["title"]
     webui = _load_webui_assets()
     _apply_index_config(webui, manifest, Path(root))
@@ -203,7 +205,7 @@ def serve(g: Graph, *, host: str = "127.0.0.1", port: int = 8000,
     data_cache = _SigCache(
         lambda: _tree_sig(*sig_paths),
         lambda: json.dumps(project_data(g, title=site_title, macros_from=macros_from,
-                                        root=root, repo=repo),
+                                        root=root, repo=repo, theme=solo_theme),
                            ensure_ascii=False).encode("utf-8"))
     _warm(data_cache, site_cache)
 
@@ -263,6 +265,22 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
     project."""
     webui = _load_webui_assets()
     _apply_index_config(webui, manifest, base)
+
+    # The cross-project `\citeext` index (handle -> label→number table). Keyed by
+    # every project's graph signature, so editing one project refreshes the
+    # numbers a sibling's citations resolve to. Built lazily and shared by all
+    # per-project payloads below.
+    proots = [base / p["root"] for p in manifest.get("projects", [])]
+    index_cache = _SigCache(
+        lambda: _tree_sig(*(pr / "hgraph" for pr in proots)),
+        lambda: build_extref_index(manifest, base))
+
+    def _project_payload(s: dict) -> bytes:
+        data = project_data(s["g"], title=s["title"], root=str(s["root"]),
+                            repo=s["repo"], theme=s["theme"])
+        data["extrefs"] = resolve_extrefs(data.get("chapters"), index_cache.get())
+        return json.dumps(data, ensure_ascii=False).encode("utf-8")
+
     mounted: dict[str, dict] = {}
     for p in manifest.get("projects", []):
         proot = base / p["root"]
@@ -270,13 +288,11 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
         state = {
             "g": Graph.open(str(proot)), "title": p.get("name", p["root"]),
             "repo": p.get("repo") or manifest.get("repo"), "root": proot,
+            "theme": _resolve_theme(p, manifest, base),
         }
         state["cache"] = _SigCache(
             (lambda pr=proot: _tree_sig(*_project_sig_paths(pr))),
-            (lambda s=state: json.dumps(
-                project_data(s["g"], title=s["title"], root=str(s["root"]),
-                             repo=s["repo"]),
-                ensure_ascii=False).encode("utf-8")))
+            (lambda s=state: _project_payload(s)))
         mounted[prefix] = state
 
     overview = manifest.get("overview")
@@ -285,7 +301,10 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
                           (base / overview) if overview else None),
         lambda: json.dumps(build_site_data(manifest, base=base),
                            ensure_ascii=False).encode("utf-8"))
-    _warm(*(s["cache"] for s in mounted.values()), site_cache)
+    # landing first: it is the page a visitor sees on arrival, so warming it
+    # ahead of the per-project payloads means a first hit during startup waits
+    # on one project's worth of work, not all of them.
+    _warm(site_cache, *(s["cache"] for s in mounted.values()))
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):

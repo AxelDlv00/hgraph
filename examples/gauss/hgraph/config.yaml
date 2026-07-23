@@ -10,3 +10,9 @@ site:
   subtitle: A small worked example of hgraph sync (blueprint + Lean → graph)
   overview: overview.md
   repo: AxelDlv00/hgraph
+  accent: '#B4530B'          # this project owns its colour — the landing card and
+                              # the blueprint view both pick it up (tints derived)
+  tabs:                       # extra blueprint tabs, beside Overview/Summary/Graph
+    - id: people
+      label: People
+      content: people.md      # relative to the project root; .md or .html
