@@ -7,6 +7,7 @@
   --line: #e7e9ee;
   --soft: #f0f2f5;
   --accent: #4f46e5;
+  --emphasis: #44546a;
   --shadow: 0 1px 2px rgba(20, 25, 35, 0.04), 0 10px 28px rgba(30, 34, 48, 0.08);
   /* status colors — keep in step with src/palette.ts, which is the source of
      truth for the TS side (badges, legends, graph nodes). `-bg` is the tint
@@ -339,7 +340,7 @@ a {
 .panel-rails { position: fixed; inset: 0; z-index: 25; pointer-events: none; }
 .panel-rail {
   position: absolute;
-  top: 72px;
+  top: 56px;
   width: 30px;
   height: 34px;
   border-color: var(--line);
@@ -1043,7 +1044,7 @@ details.stmt-detail > summary:hover { border-color: var(--accent); color: var(--
 .mtag.rv[open] { flex-basis: 100%; }
 .mtag.rv[open] > summary { margin-bottom: 8px; color: var(--heading); border-color: var(--line); }
 
-.tex-bold { color: var(--accent); }
+.tex-bold { color: var(--emphasis); }
 .tex-link {
   color: var(--accent);
   text-decoration: underline;
