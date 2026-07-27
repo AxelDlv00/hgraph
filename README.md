@@ -289,11 +289,14 @@ Custom tabs are static content pages today; the tab shape leaves room for
 interactive views later. Content is authored by the site owner and rendered as
 trusted HTML, the same as the overview and footer.
 
-Sync warnings are grouped by category and show at most three examples by
-default, so a project with hundreds of unresolved Lean references does not
-bury actual failures. Pass `hgraph sync --verbose` to show every warning.
-The same cap applies to the `serve` preflight; use `hgraph serve --verbose` to
-expand it there.
+Sync warnings are grouped by category and show at most three examples per
+category by default, so a project with hundreds of unresolved Lean references
+does not bury coverage or blueprint-structure failures. Warnings include
+missing `\lean{...}` targets, missing `\uses{...}` nodes, unattached public Lean
+declarations, duplicate Lean names, malformed proof associations, and status
+markers such as `\leanok` without an attached declaration. Pass
+`hgraph sync --verbose` to show every warning. The same cap applies to the
+`serve` preflight; use `hgraph serve --verbose` to expand it there.
 Status colors are enabled automatically on terminals; `--color always|never`
 overrides detection, and the standard `NO_COLOR` environment variable is
 respected.

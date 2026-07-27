@@ -42,6 +42,54 @@ This statement names declarations outside the scanned sources.
 \end{document}
 """
 
+BLUEPRINT_WITH_MIXED_WARNINGS = r"""
+\begin{document}
+\begin{lemma}[Attached]
+\label{attached}
+\lean{Project.attached}\leanok
+This one is connected to Lean.
+\end{lemma}
+
+\begin{lemma}[Bad dependency]
+\label{bad-dep}
+\uses{missing-label}
+This dependency should be reported.
+\end{lemma}
+
+\begin{lemma}[Bad status]
+\label{bad-status}
+\leanok
+This claims Lean coverage without naming a declaration.
+\end{lemma}
+
+\begin{lemma}[Unlabeled]
+\lean{Project.unlabeled}
+This statement cannot become a node.
+\end{lemma}
+
+\begin{proof}
+\proves{ghost}
+\uses{attached}
+This proof points at no statement.
+\end{proof}
+\end{document}
+"""
+
+LEAN_WITH_ORPHAN = r"""
+namespace Project
+
+theorem attached : True := by
+  trivial
+
+theorem orphan : True := by
+  trivial
+
+private theorem privateHelper : True := by
+  trivial
+
+end Project
+"""
+
 
 class WorkspaceSyncTests(unittest.TestCase):
     def make_project(self, workspace: Path, name: str, body: str = BLUEPRINT) -> Path:
@@ -144,6 +192,31 @@ class WorkspaceSyncTests(unittest.TestCase):
             self.assertIn("5 Lean references not found in scanned sources",
                           preflight.getvalue())
             self.assertNotIn("Missing.four", preflight.getvalue())
+
+    def test_sync_reports_distinct_unexpected_source_conditions(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self.make_project(Path(td), "project", BLUEPRINT_WITH_MIXED_WARNINGS)
+            (root / "Lean").mkdir()
+            (root / "Lean" / "Project.lean").write_text(LEAN_WITH_ORPHAN, encoding="utf-8")
+            (root / "hgraph" / "config.yaml").write_text(
+                "blueprint: blueprint/blueprint.tex\nlean: [Lean]\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = main(["--root", str(root), "sync", "--color", "never"])
+
+            self.assertEqual(code, 0)
+            report = stdout.getvalue()
+            self.assertIn("Lean declarations not attached to blueprint nodes", report)
+            self.assertIn("Project.orphan", report)
+            self.assertNotIn("Project.privateHelper", report)
+            self.assertIn("blueprint dependencies not found", report)
+            self.assertIn("missing-label", report)
+            self.assertIn("blueprint structure issues", report)
+            self.assertIn("unlabeled blueprint statement", report)
+            self.assertIn(r"\proves{ghost}", report)
+            self.assertIn("blueprint formalization status inconsistencies", report)
+            self.assertIn(r"\leanok present but no \lean{...}", report)
 
     def test_workspace_failures_stay_in_the_ordered_report(self):
         with tempfile.TemporaryDirectory() as td:

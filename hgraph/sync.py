@@ -431,7 +431,8 @@ def parse_document(text: str) -> list[dict]:
     return chapters
 
 
-def _assoc_proofs(statements: list[dict], proofs: list[dict]) -> dict[str, set[str]]:
+def _assoc_proofs(statements: list[dict], proofs: list[dict],
+                  warnings: list[str] | None = None) -> dict[str, set[str]]:
     """Map each statement label → the set of labels its proof ``\\uses``, folding
     each proof's ``\\leanok`` / ``\\mathlibok`` / ``\\sketch`` back into its
     statement. A proof with ``\\proves{lbl}`` binds to that label — any of the
@@ -447,10 +448,19 @@ def _assoc_proofs(statements: list[dict], proofs: list[dict]) -> dict[str, set[s
         if label is None:
             preceding = [s for s in statements if s["pos"] < pr["pos"]]
             if not preceding:
+                if warnings is not None and (pr["uses"] or pr["leanok"]
+                                             or pr["mathlibok"] or pr["sketch"]):
+                    warnings.append(
+                        f"proof at byte {pr['pos']}: has no preceding statement "
+                        r"and no \proves{...}; proof metadata ignored")
                 continue
             label = max(preceding, key=lambda s: s["pos"])["label"]
         else:
+            raw_label = label
             label = canonical.get(label, label)
+            if label not in by_label and warnings is not None:
+                warnings.append(
+                    f"proof at byte {pr['pos']}: \\proves{{{raw_label}}} has no blueprint node")
         proof_uses.setdefault(label, set()).update(pr["uses"])
         if label in by_label:
             by_label[label]["leanok"] |= pr["leanok"]
@@ -480,6 +490,58 @@ def _tex_lean_status(s: dict, lean_status: dict[str, str]) -> tuple[str, list[st
     return "empty", []                 # nothing resolves — Lean not written yet
 
 
+def _unlabeled_statement_warnings(text: str) -> list[str]:
+    """Warn when annotations sit on a theorem-like environment that cannot
+    become a graph node because it has no statement label."""
+    env_alt = "|".join(map(re.escape, THM_ENVS))
+    warnings: list[str] = []
+    for m in re.finditer(
+        r"\\begin\{(" + env_alt + r")\}(?:" + _OPT_TITLE + r")?(.*?)\\end\{\1\}",
+        text, re.DOTALL,
+    ):
+        env, inner = m.group(1), m.group(3)
+        annotated = (_macro_args("lean", inner) or _macro_args("uses", inner)
+                     or re.search(r"\\(leanok|mathlibok|sketch)\b", inner))
+        if annotated and not _macro_args("label", _MATH_SPAN_RE.sub("", inner)):
+            warnings.append(
+                f"{env} at byte {m.start()}: unlabeled blueprint statement "
+                "is not imported as a graph node")
+    return warnings
+
+
+def _label_warnings(statements: list[dict]) -> list[str]:
+    warnings: list[str] = []
+    owner: dict[str, str] = {}
+    for s in statements:
+        seen_here: set[str] = set()
+        for label in s["labels"]:
+            if label in seen_here:
+                warnings.append(f"{s['label']}: duplicate \\label{{{label}}} on the same statement")
+            elif label in owner and owner[label] != s["label"]:
+                warnings.append(
+                    f"{label}: blueprint label is used by more than one statement "
+                    f"({owner[label]}, {s['label']})")
+            else:
+                owner[label] = s["label"]
+            seen_here.add(label)
+    return warnings
+
+
+def _status_warnings(s: dict, lean_status: dict[str, str]) -> list[str]:
+    warnings: list[str] = []
+    if s["leanok"] and not s["lean"] and not s["mathlibok"]:
+        warnings.append(f"{s['label']}: \\leanok present but no \\lean{{...}} target is attached")
+    if s["mathlibok"] and not s["lean"]:
+        warnings.append(f"{s['label']}: \\mathlibok present but no \\lean{{...}} target is attached")
+    if s["mathlibok"]:
+        for name in s["lean"]:
+            if name in lean_status:
+                warnings.append(
+                    f"{s['label']}: \\mathlibok marks \\lean{{{name}}} as external, "
+                    "but that declaration exists in scanned Lean sources")
+    return warnings
+
+
 # --------------------------------------------------------------------------- #
 # Lean parsing
 # --------------------------------------------------------------------------- #
@@ -489,7 +551,7 @@ def parse_lean(text: str) -> list[dict]:
     comment as part of the body; flags a ``sorry``."""
     lines = text.splitlines()
     ns: list[str] = []
-    decls: list[tuple[int, str, str]] = []   # (line index, fqname, kind)
+    decls: list[tuple[int, str, str, bool]] = []   # (line index, fqname, kind, private)
     for i, line in enumerate(lines):
         s = line.strip()
         m_ns = re.match(r"namespace\s+([A-Za-z0-9_.]+)", s)
@@ -503,16 +565,17 @@ def parse_lean(text: str) -> list[dict]:
         m = _DECL_RE.match(line)
         if m:
             kind, name = m.group(1), m.group(2)
+            is_private = bool(re.search(r"\bprivate\s+", line[:m.start(1)]))
             # `_root_.Foo` is explicitly outside the surrounding namespace;
             # retaining the marker would create a name that Lean cannot refer
             # to (`MorganTianLib._root_.Foo`).
             fqname = name.removeprefix("_root_.") if name.startswith("_root_.") \
                 else ".".join(ns + [name])
-            decls.append((i, fqname, kind))
+            decls.append((i, fqname, kind, is_private))
 
     # for each decl, find the top of a /-- … -/ doc comment sitting above it
     tops: list[int] = []
-    for i, _fq, _kind in decls:
+    for i, _fq, _kind, _private in decls:
         top, j = i, i - 1
         while j >= 0 and lines[j].strip() == "":
             j -= 1
@@ -524,7 +587,7 @@ def parse_lean(text: str) -> list[dict]:
         tops.append(top)
 
     out: list[dict] = []
-    for k, (i, fq, kind) in enumerate(decls):
+    for k, (i, fq, kind, is_private) in enumerate(decls):
         # a decl's code stops where the NEXT decl's doc comment begins, so an
         # adjacent decl's doc doesn't leak into this one's body.
         end = tops[k + 1] if k + 1 < len(decls) else len(lines)
@@ -545,6 +608,7 @@ def parse_lean(text: str) -> list[dict]:
             "body": body,
             "doc": doc,
             "sorry": bool(re.search(r"\bsorry\b", body)),
+            "private": is_private,
         })
     return out
 
@@ -643,25 +707,38 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
 
     lean_id: dict[str, str] = {}
     lean_status: dict[str, str] = {}          # fqname → lean_ok | sorry
+    lean_seen_at: dict[str, str] = {}
+    lean_private: dict[str, bool] = {}
     for rel, decls in parsed:
         for d in decls:
+            if d["fqname"] in lean_seen_at:
+                warnings.append(
+                    f"{d['fqname']}: Lean declaration appears more than once "
+                    f"({lean_seen_at[d['fqname']]}, {rel})")
+            else:
+                lean_seen_at[d["fqname"]] = rel
             nid = node_id("lean", d["fqname"])
             lean_id[d["fqname"]] = nid
             lean_status[d["fqname"]] = "sorry" if d["sorry"] else "lean_ok"
+            lean_private[d["fqname"]] = bool(d.get("private"))
             node_changes += _upsert(
                 g, nid, title=d["fqname"], type="lean", content=d["body"],
                 owned={"content_type": LEAN_KINDS.get(d["kind"], d["kind"]),
                        "generated": "lean", "author": "sync", "decl": d["fqname"],
                        "lean_status": lean_status[d["fqname"]],
-                       "file": rel, "docstring": d["doc"] or None},
+                       "file": rel, "docstring": d["doc"] or None,
+                       "private": True if d.get("private") else None},
                 dry_run=dry_run)
             seen["lean"].add(nid)
 
     # 2. Blueprint nodes (keyed by \label) ---------------------------------- #
     gen_edges: list[tuple[str, str, str]] = []
     if blueprint:
-        statements, proofs = parse_blueprint(read_blueprint(blueprint))
-        proof_uses = _assoc_proofs(statements, proofs)
+        blueprint_text = read_blueprint(blueprint)
+        warnings.extend(_unlabeled_statement_warnings(blueprint_text))
+        statements, proofs = parse_blueprint(blueprint_text)
+        warnings.extend(_label_warnings(statements))
+        proof_uses = _assoc_proofs(statements, proofs, warnings)
         # every \label on a statement (canonical + any legacy aliases) resolves
         # to the same node id, so \uses{}/\lean{} can target either one
         bp_id = {lbl: node_id("bp", s["label"]) for s in statements for lbl in s["labels"]}
@@ -688,6 +765,7 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
         # edges — every endpoint is derivable, so no lookup table is needed
         for s in statements:
             src = bp_id[s["label"]]
+            warnings.extend(_status_warnings(s, lean_status))
             for name in s["lean"]:                          # \lean → formalizes
                 if name in lean_id:
                     gen_edges.append((src, lean_id[name], "formalizes"))
@@ -703,6 +781,12 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
                     gen_edges.append((src, bp_id[ref], "uses"))
                 else:
                     warnings.append(f"{s['label']}: \\uses{{{ref}}} (proof) has no blueprint node")
+
+        referenced_lean = {name for s in statements for name in s["lean"] if name in lean_id}
+        for name in sorted(lean_id):
+            if not lean_private.get(name) and name not in referenced_lean:
+                warnings.append(
+                    f"{name}: Lean declaration is not referenced by any blueprint \\lean{{...}}")
 
     # 3. reconcile generated edges: one per ordered pair, collapsed to the
     #    strongest type, never overwriting an authored edge on that pair —

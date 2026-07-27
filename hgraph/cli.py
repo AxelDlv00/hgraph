@@ -158,17 +158,32 @@ class _SyncStyle:
 
 _WARNING_LABELS = {
     "lean": "Lean references not found in scanned sources",
+    "coverage": "Lean declarations not attached to blueprint nodes",
+    "lean_duplicate": "duplicate Lean declarations",
     "dependency": "blueprint dependencies not found",
+    "blueprint": "blueprint structure issues",
+    "status": "blueprint formalization status inconsistencies",
     "edge": "generated edge conflicts",
     "other": "other sync warnings",
 }
 
 
 def _warning_kind(warning: str) -> str:
+    if "Lean declaration is not referenced by any blueprint" in warning:
+        return "coverage"
+    if "Lean declaration appears more than once" in warning:
+        return "lean_duplicate"
     if r"\lean{" in warning and warning.endswith("not found in Lean sources"):
         return "lean"
     if "has no blueprint node" in warning:
-        return "dependency"
+        return "blueprint" if warning.startswith("proof at byte ") else "dependency"
+    if ("unlabeled blueprint statement" in warning
+            or "blueprint label is used by more than one statement" in warning
+            or r"duplicate \label{" in warning
+            or "proof metadata ignored" in warning):
+        return "blueprint"
+    if r"\leanok" in warning or r"\mathlibok" in warning:
+        return "status"
     if warning.startswith("edge ") and "authored edge present" in warning:
         return "edge"
     return "other"
