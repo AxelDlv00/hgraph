@@ -1,8 +1,12 @@
+import { lazy, Suspense } from 'react';
 import type { StmtBlock, RefEntry, Dep } from '../types';
 import { leanHi, type CiteNums } from '../latex';
 import { Math as Tex } from './Tex';
-import { Reviews } from './Reviews';
 import { Network } from 'lucide-react';
+
+const Reviews = lazy(() =>
+  import('./Reviews').then((module) => ({ default: module.Reviews })),
+);
 
 const ABBR: Record<string, string> = {
   definition: 'Def', lemma: 'Lem', theorem: 'Thm', proposition: 'Prop',
@@ -163,14 +167,16 @@ export function StmtBox({
           <DependencyDetails uses={uses} usedBy={usedBy} refs={refs} macros={macros} onNavigate={onNavigate} />
           {en && <LeanDetails lean={en.lean} mathlibName={en.mathlib_name} />}
           {en && (
-            <Reviews
-              className="mtag rv"
-              root={root}
-              target={{ id: b.id, label: b.label || null, title: b.title || null }}
-              reviews={en.reviews}
-              comments={en.comments}
-              repo={repo}
-            />
+            <Suspense fallback={<span className="mtag rv">{en.reviews.length} reviews · {en.comments.length} comments</span>}>
+              <Reviews
+                className="mtag rv"
+                root={root}
+                target={{ id: b.id, label: b.label || null, title: b.title || null }}
+                reviews={en.reviews}
+                comments={en.comments}
+                repo={repo}
+              />
+            </Suspense>
           )}
         </div>
       )}

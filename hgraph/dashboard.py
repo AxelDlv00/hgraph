@@ -10,6 +10,7 @@ JSON, written by `hgraph site` or served live by `hgraph serve`.
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from pathlib import Path
 
 from .graph import Graph
@@ -76,6 +77,30 @@ def _entry(n, formalizes, deps, nodes, g) -> dict:
         "maths_verdict": (last.meta.get("maths_verdict") if last else None),
         "lean_verdict": (last.meta.get("lean_verdict") if last else None),
         "reviews": [_review_att(r) for r in reviews], "comments": [_att(c) for c in comments],
+    }
+
+
+def _entry_summary(n, formalizes, deps, nodes) -> dict:
+    """A declaration index row without bodies, attachments, or Lean source."""
+    lean = [{"name": nodes[l].meta.get("decl"),
+             "status": nodes[l].meta.get("lean_status"),
+             "file": nodes[l].meta.get("file"), "code": ""}
+            for l in formalizes.get(n.id, []) if l in nodes]
+    dep = [{"id": target, "title": nodes[target].title,
+            "label": nodes[target].meta.get("label"), "type": edge_type}
+           for target, edge_type in deps.get(n.id, []) if target in nodes]
+    return {
+        "id": n.id, "label": n.meta.get("label"), "title": n.title,
+        "chapter": n.meta.get("chapter"),
+        "kind": n.meta.get("content_type") or "statement",
+        "level": n.meta.get("level"), "ref": n.meta.get("ref"),
+        "sketch": bool(n.meta.get("sketch")), "body": "",
+        "lean_status": n.meta.get("lean_status") or "empty",
+        "mathlib_name": n.meta.get("mathlib_name"),
+        "status": n.meta.get("status"), "tags": n.meta.get("tags"),
+        "lean": lean, "deps": dep, "reviewed": False,
+        "maths_verdict": None, "lean_verdict": None,
+        "reviews": [], "comments": [],
     }
 
 
@@ -272,6 +297,12 @@ def number_document(chapters: list[dict]) -> dict:
     return refs
 
 
+_ENRICH_KEYS = (
+    "lean_status", "mathlib_name", "reviewed", "maths_verdict", "lean_verdict",
+    "lean", "deps", "reviews", "comments", "status", "tags", "ref", "sketch",
+)
+
+
 def build_document(g: Graph, blueprint: str | Path, *, title: str) -> dict:
     """The full blueprint document, numbered, + a by-id map of enriched statements,
     a label→number cross-reference table, and a statement→chapter location map."""
@@ -282,8 +313,6 @@ def build_document(g: Graph, blueprint: str | Path, *, title: str) -> dict:
     _assign_levels(list(entries.values()))
     chapters = parse_document(read_blueprint(blueprint))
     by_id, refs, loc = {}, {}, {}
-    keys = ("lean_status", "mathlib_name", "reviewed", "maths_verdict", "lean_verdict",
-            "lean", "deps", "reviews", "comments", "status", "tags", "ref", "sketch")
     # chapter/section/equation cross-references first; the statements below
     # overwrite any label they share (a statement is the more useful target)
     refs.update(number_document(chapters))
@@ -294,7 +323,7 @@ def build_document(g: Graph, blueprint: str | Path, *, title: str) -> dict:
                 e = entries.get(lbl) if lbl else None
                 if e:
                     b["id"] = e["id"]
-                    b["enrich"] = {k: e[k] for k in keys}
+                    b["enrich"] = {k: e[k] for k in _ENRICH_KEYS}
                     by_id[e["id"]] = e
                     loc[e["id"]] = ci
                 # register every \label alias (canonical + legacy book labels) so
@@ -306,6 +335,123 @@ def build_document(g: Graph, blueprint: str | Path, *, title: str) -> dict:
     graph_entries = list(by_id.values())   # levels already assigned above
     return {"title": title, "mode": "doc", "chapters": chapters,
             "entries": graph_entries, "refs": refs, "loc": loc}
+
+
+def build_document_source(g: Graph, blueprint: str | Path, *, title: str) -> tuple[dict, dict]:
+    """Build a document shell plus the indexes needed for later hydration."""
+    nodes, formalizes, deps = _index(g)
+    entry_nodes = {n.meta.get("label"): n for n in nodes.values()
+                   if n.meta.get("generated") == "blueprint"}
+    summaries = {label: _entry_summary(node, formalizes, deps, nodes)
+                 for label, node in entry_nodes.items()}
+    _assign_levels(list(summaries.values()))
+    chapters = parse_document(read_blueprint(blueprint))
+    refs = number_document(chapters)
+    by_id, loc = {}, {}
+    for ci, chapter in enumerate(chapters):
+        for block in chapter["blocks"]:
+            if block["t"] != "stmt":
+                continue
+            label = block.get("label")
+            entry = summaries.get(label) if label else None
+            if entry:
+                block["id"] = entry["id"]
+                block["enrich"] = {"lean_status": entry["lean_status"]}
+                by_id[entry["id"]] = entry
+                loc[entry["id"]] = ci
+            for alias in (block.get("labels") or ([label] if label else [])):
+                refs[alias] = {
+                    "num": block["num"], "id": (entry["id"] if entry else None),
+                    "abbr": block["abbr"], "kind": "stmt", "ch": ci,
+                    "anchor": ("stmt-" + entry["id"]) if entry else "",
+                }
+    data = {"title": title, "mode": "doc", "chapters": chapters,
+            "entries": list(by_id.values()), "refs": refs, "loc": loc}
+    source = {
+        "nodes": nodes, "formalizes": formalizes, "deps": deps,
+        "entry_nodes": entry_nodes,
+        "entry_ids": [entry["id"] for entry in data["entries"]],
+    }
+    return data, source
+
+
+def _hydrate_entries(source: dict, g: Graph) -> list[dict]:
+    entries = [_entry(node, source["formalizes"], source["deps"], source["nodes"], g)
+               for node in source["entry_nodes"].values()]
+    _assign_levels(entries)
+    by_id = {entry["id"]: entry for entry in entries}
+    return [by_id[nid] for nid in source["entry_ids"] if nid in by_id]
+
+
+def _hydrate_chapter_from_entries(chapter: dict, entries_by_label: dict) -> dict:
+    chapter = deepcopy(chapter)
+    for block in chapter.get("blocks") or []:
+        if block.get("t") != "stmt":
+            continue
+        entry = entries_by_label.get(block.get("label"))
+        if entry:
+            block["id"] = entry["id"]
+            block["enrich"] = {key: entry[key] for key in _ENRICH_KEYS}
+    return chapter
+
+
+def hydrate_project_chapter(project: dict, g: Graph, index: int) -> dict:
+    """Hydrate only one chapter's declarations and collaboration notes."""
+    source = project.get("source")
+    chapters = project["data"].get("chapters") or []
+    if not source:
+        return deepcopy(chapters[index])
+    labels = {block.get("label") for block in chapters[index].get("blocks") or []
+              if block.get("t") == "stmt" and block.get("label")}
+    entries = {
+        label: _entry(source["entry_nodes"][label], source["formalizes"],
+                      source["deps"], source["nodes"], g)
+        for label in labels if label in source["entry_nodes"]
+    }
+    return _hydrate_chapter_from_entries(chapters[index], entries)
+
+
+def hydrate_project_entries(project: dict, g: Graph) -> list[dict]:
+    """Hydrate all entries for the graph view, without copying chapters."""
+    source = project.get("source")
+    return _hydrate_entries(source, g) if source else deepcopy(project["data"]["entries"])
+
+
+def hydrate_project_data(project: dict, g: Graph) -> dict:
+    """Materialize the monolithic compatibility payload on demand."""
+    data = deepcopy(project["data"])
+    source = project.get("source")
+    if not source:
+        return data
+    entries = _hydrate_entries(source, g)
+    by_label = {entry.get("label"): entry for entry in entries}
+    data["entries"] = entries
+    data["chapters"] = [_hydrate_chapter_from_entries(chapter, by_label)
+                        for chapter in data.get("chapters") or []]
+    return data
+
+
+def document_refs(blueprint: str | Path) -> dict:
+    """Build only a blueprint's label-to-number table.
+
+    Cross-project citations need numbers and abbreviations, not graph
+    enrichment, attachments, Lean source, or Graphviz.  Keeping this path
+    document-only prevents opening one chapter from forcing every sibling
+    project through a full declaration build.
+    """
+    chapters = parse_document(read_blueprint(blueprint))
+    refs = number_document(chapters)
+    for ci, chapter in enumerate(chapters):
+        for block in chapter.get("blocks") or []:
+            if block.get("t") != "stmt":
+                continue
+            label = block.get("label")
+            for alias in (block.get("labels") or ([label] if label else [])):
+                refs[alias] = {
+                    "num": block["num"], "id": None, "abbr": block["abbr"],
+                    "kind": "stmt", "ch": ci, "anchor": "",
+                }
+    return refs
 
 
 # `\citeext{Handle}{label}` (cross-project cite) or bare `\citeext{Handle}`. The
@@ -379,7 +525,8 @@ def _resolve_repo(repo, root):
 
 
 def project_data(g: Graph, *, title: str, blueprint=None, macros_from=None,
-                 root: str = ".", repo=None, theme: dict | None = None) -> dict:
+                 root: str = ".", repo=None, theme: dict | None = None,
+                 include_layout: bool = True) -> dict:
     """One project's full data payload — everything the React `ProjectView`
     needs: the numbered document (chapters/prose/cross-refs) if a blueprint
     is configured, else a flat statement list; entries (statements + Lean +
@@ -412,9 +559,113 @@ def project_data(g: Graph, *, title: str, blueprint=None, macros_from=None,
         "repo": _resolve_repo(repo, root),
         "theme": theme,
         "customTabs": _content_tabs(site_cfg.get("tabs"), base=Path(root), where="project"),
-        "gvsvg": render_svgs(data),
+        "gvsvg": render_svgs(data) if include_layout else {},
     })
     return data
+
+
+_ENTRY_SHELL_KEYS = (
+    "id", "label", "title", "chapter", "kind", "level", "ref", "sketch",
+    "lean_status", "mathlib_name", "status", "tags", "deps", "reviewed",
+    "maths_verdict", "lean_verdict",
+)
+
+
+def _entry_shell(entry: dict) -> dict:
+    """The entry fields needed before a chapter or graph is opened.
+
+    Status, dependency, and Lean declaration names power the project header and
+    summary immediately.  Statement prose, Lean source, and collaboration notes
+    stay in the chapter/graph payloads where they are actually rendered.
+    Empty compatibility fields keep older frontend helpers harmless if they see
+    a shell entry (for example a title-only hover preview).
+    """
+    out = {k: entry.get(k) for k in _ENTRY_SHELL_KEYS}
+    out.update({
+        "body": "",
+        "lean": [{"name": item.get("name"), "status": item.get("status"),
+                  "file": item.get("file"), "code": ""}
+                 for item in entry.get("lean") or []],
+        "reviews": [],
+        "comments": [],
+    })
+    return out
+
+
+def _chapter_shell(chapter: dict) -> dict:
+    """A chapter outline: headings and compact statements, without prose."""
+    out = {k: v for k, v in chapter.items() if k != "blocks"}
+    blocks = []
+    for block in chapter.get("blocks") or []:
+        if block.get("t") == "head":
+            blocks.append(dict(block))
+        elif block.get("t") == "stmt":
+            summary = {k: block.get(k) for k in (
+                "t", "label", "labels", "title", "content_type", "lean", "uses",
+                "leanok", "mathlibok", "num", "abbr", "id",
+            )}
+            summary["body"] = ""
+            enrich = block.get("enrich") or {}
+            summary["enrich"] = {"lean_status": enrich.get("lean_status", "empty")}
+            blocks.append(summary)
+    out["blocks"] = blocks
+    return out
+
+
+def split_project_data(data: dict) -> tuple[dict, list[dict], dict]:
+    """Split a full project payload into shell, chapters, and graph data.
+
+    ``project.json`` can therefore paint the complete project chrome and
+    outline without downloading every declaration body.  The filenames are
+    described in the shell instead of being hard-coded in the frontend, which
+    leaves room for a future contract version while ``data.json`` remains a
+    monolithic compatibility endpoint.
+    """
+    chapters = data.get("chapters") or []
+    shell = {k: v for k, v in data.items()
+             if k not in ("chapters", "entries", "gvsvg", "extrefs")}
+    shell["entries"] = ([_entry_shell(e) for e in data.get("entries") or []]
+                        if chapters else list(data.get("entries") or []))
+    shell["chapters"] = [_chapter_shell(ch) for ch in chapters]
+    lazy = {"version": 1, "graph": "graph.json", "extrefs": "extrefs.json"}
+    if chapters:
+        lazy["chapters"] = "chapters/{index}.json"
+    shell["lazy"] = lazy
+    graph = {"entries": list(data.get("entries") or []),
+             "gvsvg": data.get("gvsvg") or {}}
+    return shell, list(chapters), graph
+
+
+def project_source(g: Graph, *, title: str, blueprint=None, macros_from=None,
+                   root: str = ".", repo=None, theme: dict | None = None) -> dict:
+    """Build the fast live-server shell and retain its reusable source model.
+
+    Unlike :func:`project_data`, this path does not read attachments, copy Lean
+    source into entries, or invoke Graphviz. Those fields are hydrated by the
+    chapter/graph endpoints only when requested.
+    """
+    from .site import _content_tabs
+
+    bp = _resolve_blueprint(blueprint, root)
+    if bp:
+        data, source = build_document_source(g, bp, title=title)
+    else:
+        data = {**collect(g, title=title), "mode": "list"}
+        source = None
+    title_author = discover_titleauthor(bp) if bp else {}
+    site_cfg = load_config(root).get("site") or {}
+    data.update({
+        "bib": discover_bib(bp) if bp else [],
+        "docTitle": title_author.get("title") or title,
+        "docAuthor": title_author.get("author"),
+        "macros": resolve_macros(bp, macros_from),
+        "repo": _resolve_repo(repo, root),
+        "theme": theme,
+        "customTabs": _content_tabs(site_cfg.get("tabs"), base=Path(root), where="project"),
+        "gvsvg": {},
+    })
+    shell, _, _ = split_project_data(data)
+    return {"data": data, "source": source, "shell": shell}
 
 
 # --------------------------------------------------------------------------- #
@@ -555,4 +806,3 @@ def resolve_macros(blueprint, macros_from) -> dict:
     m = discover_macros(blueprint)
     m.update(_macros(macros_from))            # an explicit --macros wins
     return m
-

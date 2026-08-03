@@ -254,6 +254,19 @@ export interface ProjectData {
    *  `hgraph/config.yaml` -> `site.tabs:` */
   customTabs?: ContentTab[];
   gvsvg?: Record<string, string>;
+  /** Versioned incremental payload locations. Absent on older monolithic
+   *  exports, which the frontend still accepts through data.json. */
+  lazy?: {
+    version: number;
+    chapters?: string;
+    graph: string;
+    extrefs?: string;
+  };
+}
+
+export interface ProjectGraphData {
+  entries: Entry[];
+  gvsvg?: Record<string, string>;
 }
 
 declare global {

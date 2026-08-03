@@ -224,8 +224,34 @@ function detexRest(s: string): string {
   return s;
 }
 
+/** Mathtools environments that KaTeX does not provide, expressed using its
+ * supported primitives. This runs before math is protected, so it also covers
+ * environments inside inline `$...$` delimiters. */
+function normalizeMathCompat(s: string): string {
+  return s
+    .replace(/\\begin\{bsmallmatrix\}/g, '\\left[\\begin{smallmatrix}')
+    .replace(/\\end\{bsmallmatrix\}/g, '\\end{smallmatrix}\\right]');
+}
+
+/** Split the rows of a top-level display environment without treating row
+ * separators inside a nested matrix/cases environment as outer rows. */
+function displayRows(body: string): string[] {
+  const nested: string[] = [];
+  const masked = body.replace(
+    /\\begin\{([a-zA-Z]+\*?)\}[\s\S]*?\\end\{\1\}/g,
+    (m) => {
+      nested.push(m);
+      return `@@MROW${nested.length - 1}WORM@@`;
+    },
+  );
+  return masked
+    .split(/\\\\(?:\s*\[[^\]]*\])?/)
+    .map((row) => row.replace(/@@MROW(\d+)WORM@@/g, (_m, i) => nested[+i]));
+}
+
 /** Wrap standalone display-math environments so KaTeX renders them. */
 function mathEnvs(s: string): string {
+  s = normalizeMathCompat(s);
   const strip = (b: string) =>
     b.replace(/\\label\{[^{}]*\}/g, '').replace(/\\(?:notag|nonumber)\b/g, '').replace(/(\\begin\{array\})\s*\[[a-zA-Z]\]/g, '$1');
   // Each numbered equation carries its number as a `\tag{…}` the backend wrote
@@ -249,10 +275,32 @@ function mathEnvs(s: string): string {
     /\\begin\{(eqnarray\*?|align\*?|alignat\*?|flalign\*?|gather\*?|multline\*?)\}([\s\S]*?)\\end\{\1\}/g,
     (_m, env, b) => {
       const inner = /^gather/.test(env) ? 'gathered' : 'aligned';
-      const a = anchors(b);
       if (/^eqnarray/.test(env)) b = b.replace(/&\s*([^&\n]*?)\s*&/g, '&$1');
       else if (/^alignat/.test(env)) b = b.replace(/^\s*\{?\d+\}?/, '');
-      return `${a}\\[\\begin{${inner}}${strip(b)}\\end{${inner}}\\]`;
+
+      // KaTeX accepts `\\tag` at the display's top level, but rejects tags
+      // nested in `aligned`/`gathered`. The backend numbers `align` one row at
+      // a time, so render tagged rows as separate displays and move each tag
+      // outside its one-row alignment wrapper.
+      if (/\\tag\*?\{/.test(b) && !/^multline/.test(env)) {
+        return displayRows(b)
+          .map((row) => {
+            const tag = row.match(/\\tag\*?\{[^{}]*\}/)?.[0] || '';
+            const content = strip(row).replace(/\\tag\*?\{[^{}]*\}/g, '').trim();
+            if (!content) return '';
+            const formula = /^gather/.test(env)
+              ? content
+              : `\\begin{aligned}${content}\\end{aligned}`;
+            return `${anchors(row)}\\[${formula}${tag}\\]`;
+          })
+          .join('');
+      }
+
+      // `multline` has one number for the whole environment. Keep its rows in
+      // one display and move that single tag outside the alignment wrapper.
+      const tag = b.match(/\\tag\*?\{[^{}]*\}/)?.[0] || '';
+      const content = strip(b).replace(/\\tag\*?\{[^{}]*\}/g, '');
+      return `${anchors(b)}\\[\\begin{${inner}}${content}\\end{${inner}}${tag}\\]`;
     },
   );
   s = prot(s);

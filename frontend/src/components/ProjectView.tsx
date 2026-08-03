@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ProjectData, Dep, StmtBlock } from '../types';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Chapter, ProjectData, ProjectGraphData, Dep, StmtBlock } from '../types';
 import { ChapterView } from './ChapterView';
 import { Toc, type ViewName } from './Toc';
 import { Outline } from './Outline';
 import { Overview } from './Overview';
 import { StmtBox } from './StmtBox';
 import { HoverPreview } from './HoverPreview';
-import { GraphModal } from './GraphModal';
 import { Summary } from './Summary';
 import { Bibliography } from './Bibliography';
 import { ContentPage } from './ContentPage';
@@ -18,12 +17,28 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  RotateCw,
+  X,
 } from 'lucide-react';
+
+const GraphModal = lazy(() =>
+  import('./GraphModal').then((module) => ({ default: module.GraphModal })),
+);
 
 // how many search results render at once — past this, a broad query (one
 // letter, or a bare status chip on a large blueprint) would typeset hundreds
 // of KaTeX boxes for content nobody scrolls through
 const MAX_RESULTS = 120;
+
+function projectAsset(root: string, path: string): string {
+  return `${root.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+}
+
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json() as Promise<T>;
+}
 
 function useStoredPanelState(key: string): [boolean, () => void] {
   const [open, setOpen] = useState(() => {
@@ -57,9 +72,71 @@ function flashEl(id: string) {
   });
 }
 
+function GraphPending({
+  error,
+  onRetry,
+  onClose,
+}: {
+  error?: string | null;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="graph-modal">
+      <div className="gm-bar">
+        <h2>Dependency graph</h2>
+        <span className="sp" />
+        {error && (
+          <button type="button" className="gm-btn" onClick={onRetry} title="Retry graph loading" aria-label="Retry graph loading">
+            <RotateCw size={16} aria-hidden="true" />
+          </button>
+        )}
+        <button type="button" className="gm-btn" onClick={onClose} title="Close graph" aria-label="Close graph">
+          <X size={17} aria-hidden="true" />
+        </button>
+      </div>
+      <div className={error ? 'page-error' : 'page-loading'}>
+        {error ? `Couldn't load the dependency graph: ${error}` : 'Preparing dependency graph…'}
+      </div>
+    </div>
+  );
+}
+
+function ContentPending({
+  label,
+  error,
+  onRetry,
+}: {
+  label: string;
+  error?: string | null;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="doc">
+      <div className={error ? 'page-error' : 'page-loading'}>
+        <span>{error ? `Couldn't load ${label}: ${error}` : `Loading ${label}…`}</span>
+        {error && (
+          <button type="button" className="gm-btn" onClick={onRetry} title={`Retry ${label}`} aria-label={`Retry ${label}`}>
+            <RotateCw size={16} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ProjectView({ root, initialLocator }: { root: string; initialLocator?: string | null }) {
   const [data, setData] = useState<ProjectData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadedChapters, setLoadedChapters] = useState<Set<number>>(new Set());
+  const [loadingChapters, setLoadingChapters] = useState<Set<number>>(new Set());
+  const [chapterErrors, setChapterErrors] = useState<Map<number, string>>(new Map());
+  const chapterRequests = useRef(new Map<number, Promise<Chapter>>());
+  const extrefsRequest = useRef<Promise<void> | null>(null);
+  const [graphData, setGraphData] = useState<ProjectGraphData | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [graphError, setGraphError] = useState<string | null>(null);
+  const graphRequest = useRef<Promise<void> | null>(null);
   const [curCh, setCurCh] = useState(0);
   // `selectedId` is doc-view highlighting only (no panel — the statement's
   // body IS already its own detail, right there in the document). The graph
@@ -94,19 +171,144 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     setDefaultMacros(data?.macros);
     setExtRefs(data?.extrefs);
     return () => { setDefaultMacros(null); setExtRefs(null); };
-  }, [data]);
+  }, [data?.macros, data?.extrefs]);
 
   useEffect(() => {
+    const controller = new AbortController();
     setData(null);
     setError(null);
-    fetch(`${root}/data.json`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-        return r.json();
-      })
-      .then(setData)
-      .catch((e) => setError(String(e)));
+    setLoadedChapters(new Set());
+    setLoadingChapters(new Set());
+    setChapterErrors(new Map());
+    setGraphData(null);
+    setGraphError(null);
+    graphRequest.current = null;
+    chapterRequests.current.clear();
+    extrefsRequest.current = null;
+
+    async function load() {
+      let project: ProjectData;
+      try {
+        project = await fetchJson<ProjectData>(projectAsset(root, 'project.json'), controller.signal);
+      } catch (shellError) {
+        if (controller.signal.aborted) return;
+        try {
+          // Compatibility with sites generated before incremental payloads.
+          project = await fetchJson<ProjectData>(projectAsset(root, 'data.json'), controller.signal);
+        } catch (fallbackError) {
+          if (!controller.signal.aborted) setError(String(fallbackError || shellError));
+          return;
+        }
+      }
+      if (controller.signal.aborted) return;
+      setData(project);
+      if (!project.lazy?.chapters) {
+        setLoadedChapters(new Set((project.chapters || []).map((_, index) => index)));
+      }
+    }
+
+    void load();
+    return () => controller.abort();
   }, [root]);
+
+  const loadExtrefs = useCallback((): Promise<void> => {
+    const path = data?.lazy?.extrefs;
+    if (!data || !path || data.extrefs) return Promise.resolve();
+    if (extrefsRequest.current) return extrefsRequest.current;
+    const request = fetchJson<NonNullable<ProjectData['extrefs']>>(projectAsset(root, path))
+      .then((extrefs) => setData((current) => current ? { ...current, extrefs } : current))
+      .catch(() => {
+        // Cross-project citation labels are supplementary. A missing legacy
+        // endpoint must not prevent the chapter itself from opening.
+        setData((current) => current ? { ...current, extrefs: {} } : current);
+      });
+    extrefsRequest.current = request;
+    return request;
+  }, [data, root]);
+
+  const loadChapter = useCallback((index: number): Promise<Chapter> => {
+    const current = data?.chapters?.[index];
+    const pattern = data?.lazy?.chapters;
+    if (!current) return Promise.reject(new Error(`Unknown chapter ${index + 1}`));
+    if (!pattern || loadedChapters.has(index)) return Promise.resolve(current);
+    const pending = chapterRequests.current.get(index);
+    if (pending) return pending;
+
+    setLoadingChapters((values) => new Set(values).add(index));
+    setChapterErrors((values) => {
+      const next = new Map(values);
+      next.delete(index);
+      return next;
+    });
+    // Reference labels may take longer in a workspace because they span sibling
+    // projects. Start them alongside the chapter, but never hold its first paint.
+    void loadExtrefs();
+    const request = fetchJson<Chapter>(projectAsset(root, pattern.replace('{index}', String(index))))
+      .then((chapter) => {
+        setData((value) => {
+          if (!value?.chapters) return value;
+          const chapters = value.chapters.slice();
+          chapters[index] = chapter;
+          const hydrated = new Map(
+            chapter.blocks
+              .filter((block): block is StmtBlock => block.t === 'stmt' && !!block.id)
+              .map((block) => [block.id!, block]),
+          );
+          const entries = value.entries.map((entry) => {
+            const block = hydrated.get(entry.id);
+            return block?.enrich
+              ? { ...entry, body: block.body, ...block.enrich }
+              : entry;
+          });
+          return { ...value, chapters, entries };
+        });
+        setLoadedChapters((values) => new Set(values).add(index));
+        return chapter;
+      })
+      .catch((reason) => {
+        const message = String(reason);
+        setChapterErrors((values) => new Map(values).set(index, message));
+        throw reason;
+      })
+      .finally(() => {
+        chapterRequests.current.delete(index);
+        setLoadingChapters((values) => {
+          const next = new Set(values);
+          next.delete(index);
+          return next;
+        });
+      });
+    chapterRequests.current.set(index, request);
+    return request;
+  }, [data, loadExtrefs, loadedChapters, root]);
+
+  const loadAllChapters = useCallback(async () => {
+    const chapters = data?.chapters || [];
+    await Promise.all(chapters.map((_, index) => loadChapter(index)));
+  }, [data?.chapters, loadChapter]);
+
+  const loadGraph = useCallback((): Promise<void> => {
+    if (!data || graphData) return Promise.resolve();
+    if (graphRequest.current) return graphRequest.current;
+    if (!data.lazy?.graph) {
+      setGraphData({ entries: data.entries, gvsvg: data.gvsvg });
+      return Promise.resolve();
+    }
+    setGraphLoading(true);
+    setGraphError(null);
+    const request = fetchJson<ProjectGraphData>(projectAsset(root, data.lazy.graph))
+      .then(setGraphData)
+      .catch((reason) => {
+        setGraphError(String(reason));
+        throw reason;
+      })
+      .finally(() => {
+        graphRequest.current = null;
+        setGraphLoading(false);
+      });
+    graphRequest.current = request;
+    return request;
+  }, [data, graphData, root]);
 
   // keep the URL's "#/<root>#<locator>" in sync with the current statement/
   // chapter, so external links (e.g. a proof-structure diagram) can deep-link
@@ -124,11 +326,16 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     requestAnimationFrame(() => { hashnav.current = false; });
   }, [root]);
 
-  // reverse dependency index ("used by"), computed once per fetch
+  const entries = useMemo(() => graphData?.entries || data?.entries || [], [data?.entries, graphData]);
+  const graphProjectData = useMemo<ProjectData | null>(
+    () => data && graphData ? { ...data, entries: graphData.entries, gvsvg: graphData.gvsvg } : null,
+    [data, graphData],
+  );
+
+  // reverse dependency index ("used by"), computed once per payload
   const usedByMap = useMemo(() => {
     const map = new Map<string, Dep[]>();
-    if (!data) return map;
-    for (const e of data.entries) {
+    for (const e of entries) {
       for (const d of e.deps) {
         const back: Dep = { id: e.id, title: e.title, label: e.label, type: d.type };
         if (!map.has(d.id)) map.set(d.id, []);
@@ -136,12 +343,14 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
       }
     }
     return map;
-  }, [data]);
-  const byId = useMemo(() => new Map((data?.entries || []).map((e) => [e.id, e])), [data]);
+  }, [entries]);
+  const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
 
   // stable identities per fetch — BlockView is memoised on these
   const refs = useMemo(() => data?.refs || {}, [data]);
   const chapters = useMemo(() => data?.chapters || [], [data]);
+  const allChaptersLoaded = !data?.lazy?.chapters
+    || chapters.every((_, index) => loadedChapters.has(index));
   // \cite{key} renders as its bibliography number, the way LaTeX numbers it
   const cites = useMemo(() => citeNums(data?.bib), [data]);
 
@@ -155,12 +364,14 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     setCurCh(chapterIndex);
     setSelectedId(null);
     setAnchor(elementId || null);
-    if (!elementId) return;
-    requestAnimationFrame(() => {
-      document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-    flashEl(elementId);
-  }, []);
+    void loadChapter(chapterIndex).then(() => {
+      if (!elementId) return;
+      requestAnimationFrame(() => {
+        document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flashEl(elementId);
+      });
+    }).catch(() => undefined);
+  }, [loadChapter]);
 
   // useCallback: navigate is a prop of every memoised BlockView — a fresh
   // closure per render would defeat the memo and re-render whole chapters
@@ -177,21 +388,25 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     setQuery('');
     setStatusFilter(new Set());
     const loc = data?.loc?.[id];
+    const chapterIndex = loc ?? curCh;
     if (loc !== undefined && loc !== curCh) setCurCh(loc);
     setSelectedId(id);
     setAnchor(`stmt-${id}`);
-    requestAnimationFrame(() => {
-      document.getElementById(`stmt-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-    flashEl(`stmt-${id}`);
+    void loadChapter(chapterIndex).then(() => {
+      requestAnimationFrame(() => {
+        document.getElementById(`stmt-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flashEl(`stmt-${id}`);
+      });
+    }).catch(() => undefined);
     const e = data?.entries.find((x) => x.id === id);
     setHash(e?.label || id);
-  }, [data, chapters, curCh, setHash, gotoAnchor]);
+  }, [data, chapters, curCh, setHash, gotoAnchor, loadChapter]);
 
   const openInGraph = useCallback((id: string) => {
     setGraphSelectedId(id);
     setGraphOpen(true);
-  }, []);
+    void loadGraph().catch(() => undefined);
+  }, [loadGraph]);
 
   const openInBlueprint = useCallback((id: string) => {
     setGraphOpen(false);
@@ -204,9 +419,11 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     setCurCh(chapterIndex);
     setSelectedId(null);
     setAnchor(`sec-${num}`);
-    requestAnimationFrame(() => {
-      document.getElementById(`sec-${num}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    void loadChapter(chapterIndex).then(() => {
+      requestAnimationFrame(() => {
+        document.getElementById(`sec-${num}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }).catch(() => undefined);
   }
 
   // jump to a specific citing block from the bibliography's "Cited in" list —
@@ -216,7 +433,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     gotoAnchor(chapterIndex, blockAnchor);
   }, [gotoAnchor]);
 
-  function gotoChapter(chapterIndex: number) {
+  const gotoChapter = useCallback((chapterIndex: number) => {
     setView('doc');
     setQuery('');
     setStatusFilter(new Set());
@@ -224,13 +441,17 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     setSelectedId(null);
     setAnchor(null);
     setHash(`ch-${chapterIndex + 1}`);
-  }
+    void loadChapter(chapterIndex).catch(() => undefined);
+  }, [loadChapter, setHash]);
 
   // honour an incoming "#/<root>#<locator>" once the data's loaded — same
   // syntax the original's `gotoHash` understood (a chapter "ch-N"/"chapter-N",
   // an optional "stmt-" prefix, or a raw \label / node id).
+  const handledLocator = useRef<string | null>(null);
   useEffect(() => {
     if (!data || !initialLocator) return;
+    if (handledLocator.current === initialLocator) return;
+    handledLocator.current = initialLocator;
     let h = initialLocator;
     const chMatch = h.match(/^(?:ch|chapter)-(\d+)$/i);
     if (chMatch) {
@@ -245,29 +466,34 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     // re-run on locator changes too: an external link can change just the
     // "#…#<locator>" part while staying in the same project (our own setHash
     // uses replaceState, which fires no hashchange, so it never loops this)
-  }, [data, initialLocator]);
+  }, [data, initialLocator, navigate, gotoChapter]);
 
   function toggleStatus(s: string) {
     setView('doc');
+    void loadAllChapters().catch(() => undefined);
     const next = new Set(statusFilter);
-    next.has(s) ? next.delete(s) : next.add(s);
+    if (next.has(s)) next.delete(s);
+    else next.add(s);
     setStatusFilter(next);
   }
 
   function onQueryChange(q: string) {
     setView('doc');
     setQuery(q);
+    if (q.trim() || statusFilter.size) void loadAllChapters().catch(() => undefined);
   }
 
   const [flashBibKey, setFlashBibKey] = useState<string | null>(null);
   const onCite = useCallback((key: string) => {
     setView('biblio');
     setFlashBibKey(key);
-    requestAnimationFrame(() => {
-      document.querySelector(`.bibitem[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' });
-    });
-    window.setTimeout(() => setFlashBibKey(null), 1700);
-  }, []);
+    void loadAllChapters().then(() => {
+      requestAnimationFrame(() => {
+        document.querySelector(`.bibitem[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' });
+      });
+      window.setTimeout(() => setFlashBibKey(null), 1700);
+    }).catch(() => undefined);
+  }, [loadAllChapters]);
 
   // debounce the query so each keystroke doesn't rebuild + re-render the
   // whole results list; the input itself stays controlled by `query`
@@ -290,7 +516,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
   // search/filter across all statements — matches when a query and/or status
   // filter is active, ported from the original's "results mode"
   const filtered = useMemo(() => {
-    if (!data || (!debouncedQuery.trim() && statusFilter.size === 0)) return null;
+    if (!data || !allChaptersLoaded || (!debouncedQuery.trim() && statusFilter.size === 0)) return null;
     const q = debouncedQuery.trim().toLowerCase();
     const stmts: StmtBlock[] = chapters.flatMap((ch) => ch.blocks.filter((b): b is StmtBlock => b.t === 'stmt'));
     return stmts.filter((b) => {
@@ -298,20 +524,22 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
       if (q && !(searchText.get(b) || '').includes(q)) return false;
       return true;
     });
-  }, [data, debouncedQuery, statusFilter, chapters, searchText]);
+  }, [data, allChaptersLoaded, debouncedQuery, statusFilter, chapters, searchText]);
 
   function onSetView(v: ViewName) {
     if (v === 'graph') {
       setGraphOpen(true);
+      void loadGraph().catch(() => undefined);
       return;
     }
     setView(v);
+    if (v === 'biblio') void loadAllChapters().catch(() => undefined);
   }
 
   // live header stats — total/mathlib/lean/sorry counts + formalized % —
   // ported from the original's `stats()`.
   const stats = useMemo(() => {
-    const es = data?.entries || [];
+    const es = entries;
     const c = { total: es.length, mathlib_ok: 0, lean_ok: 0, sorry: 0 };
     for (const e of es) {
       if (e.lean_status === 'mathlib_ok') c.mathlib_ok++;
@@ -320,12 +548,18 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     }
     const pct = Math.round((100 * (c.lean_ok + c.mathlib_ok)) / Math.max(1, c.total));
     return { ...c, pct };
-  }, [data]);
+  }, [entries]);
 
   if (error) return <div className="page-error">Couldn't load this project: {error}</div>;
   if (!data) return <div className="page-loading">Loading…</div>;
 
   const showResults = view === 'doc' && !!filtered;
+  const needsAllChapters = view === 'biblio'
+    || (view === 'doc' && (!!query.trim() || statusFilter.size > 0));
+  const allLoadError = Array.from(chapterErrors.values())[0] || null;
+  const chaptersAreLoading = loadingChapters.size > 0;
+  const currentChapterLoaded = !data.lazy?.chapters || loadedChapters.has(curCh);
+  const currentChapterError = chapterErrors.get(curCh) || null;
   const customTabs = data.customTabs ?? [];
   const activeCustom = customTabs.find((c) => c.id === view);
   // a project's configured accent recolours its whole blueprint view — every
@@ -339,17 +573,33 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     <div className="project-page" style={accentStyle}>
       {/* while the graph modal is open, clicks in its pinned mini-graph popup
           must select within the modal, not silently change the doc view behind it */}
-      <HoverPreview data={data} root={root} onNavigate={graphOpen ? setGraphSelectedId : navigate} />
-      {graphOpen && (
-        <GraphModal
-          data={data}
-          root={root}
-          selectedId={graphSelectedId}
-          onSelect={setGraphSelectedId}
-          onOpenBlueprint={openInBlueprint}
+      <HoverPreview data={graphProjectData || data} root={root} onNavigate={graphOpen ? openInGraph : navigate} />
+      {graphOpen && graphProjectData && (
+        <Suspense
+          fallback={(
+            <GraphPending
+              onRetry={() => { void loadGraph().catch(() => undefined); }}
+              onClose={() => setGraphOpen(false)}
+            />
+          )}
+        >
+          <GraphModal
+            data={graphProjectData}
+            root={root}
+            selectedId={graphSelectedId}
+            onSelect={setGraphSelectedId}
+            onOpenBlueprint={openInBlueprint}
+            onClose={() => setGraphOpen(false)}
+            usedByMap={usedByMap}
+            byId={byId}
+          />
+        </Suspense>
+      )}
+      {graphOpen && !graphProjectData && (
+        <GraphPending
+          error={graphLoading ? null : graphError}
+          onRetry={() => { void loadGraph().catch(() => undefined); }}
           onClose={() => setGraphOpen(false)}
-          usedByMap={usedByMap}
-          byId={byId}
         />
       )}
       <header className="project-header">
@@ -429,7 +679,13 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
           {activeCustom ? (
             <ContentPage html={activeCustom.html} className="doc" />
           ) : view === 'summary' ? (
-            <Summary entries={data.entries} chapters={chapters} refs={refs} onSelect={navigate} onGotoChapter={gotoChapter} />
+            <Summary entries={entries} chapters={chapters} refs={refs} onSelect={navigate} onGotoChapter={gotoChapter} />
+          ) : needsAllChapters && !allChaptersLoaded ? (
+            <ContentPending
+              label={view === 'biblio' ? 'bibliography references' : 'search index'}
+              error={chaptersAreLoading ? null : allLoadError}
+              onRetry={() => { void loadAllChapters().catch(() => undefined); }}
+            />
           ) : view === 'biblio' ? (
             <Bibliography bib={data.bib} chapters={chapters} onGotoLoc={gotoLoc} flashKey={flashBibKey} />
           ) : showResults && filtered ? (
@@ -468,6 +724,12 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
               onGoto={navigate}
               onGotoChapter={gotoChapter}
               onGotoSection={gotoSection}
+            />
+          ) : chapters.length > 0 && !currentChapterLoaded ? (
+            <ContentPending
+              label={`chapter ${chapters[curCh]?.num || curCh + 1}`}
+              error={loadingChapters.has(curCh) ? null : currentChapterError}
+              onRetry={() => { void loadChapter(curCh).catch(() => undefined); }}
             />
           ) : chapters.length > 0 ? (
             <ChapterView

@@ -7,11 +7,11 @@ either:
 
 * writes a static ``index.html`` + a sibling ``assets/`` dir — the pre-built
   frontend at :data:`WEBUI_DIR` (shipped with the package, no Node needed) —
-  plus one ``<root>/data.json`` per project, with the landing data injected
-  as ``window.__HGRAPH_DATA__``; or
+  plus split project/chapter/graph JSON payloads, with the landing data
+  injected as ``window.__HGRAPH_DATA__``; or
 * (see :mod:`hgraph.server`) is served live, with the landing data instead
   fetched from ``GET /api/site`` and each project's from ``GET
-  /<root>/data.json``.
+  /<root>/project.json`` followed by feature payloads on demand.
 
 The frontend hash-routes from the landing page to a project (``#/<root>``)
 client-side — no extra HTML file, no server-side routing needed either way.
@@ -22,8 +22,10 @@ generated files never mix into the sources they were built from::
     _site/
       index.html                     the landing page (data injected inline)
       assets/                        the pre-built frontend bundle
-      examples/gauss/data.json       one per project in the manifest
-      examples/triangular/data.json
+      examples/gauss/project.json    lightweight project shell
+      examples/gauss/chapters/0.json full chapter, loaded on demand
+      examples/gauss/graph.json      declarations + precomputed graph layout
+      examples/gauss/data.json       monolithic compatibility payload
 
 That tree is the whole deployable site — it is what ``.github/workflows/
 pages.yml`` publishes, with nothing to assemble by hand.
@@ -790,11 +792,9 @@ def _extref_index_from(entries_data: list) -> dict:
 
 def build_extref_index(manifest: dict, base: Path) -> dict:
     """The same index, computed from scratch (for the live server, where each
-    project's data is cached separately). Uses ``build_document`` — the blueprint
-    parse only, no Graphviz — so it is much cheaper than a full ``project_data``
-    per project."""
-    from .dashboard import build_document, _resolve_blueprint
-    from .graph import Graph
+    project's data is cached separately). This parses and numbers each blueprint
+    without loading or enriching its graph declarations."""
+    from .dashboard import document_refs, _resolve_blueprint
     index = {}
     for p in manifest.get("projects", []):
         root = str(p["root"]).strip("/")
@@ -803,8 +803,7 @@ def build_extref_index(manifest: dict, base: Path) -> dict:
         try:
             bp = _resolve_blueprint(None, str(base / p["root"]))
             if bp:
-                refs = build_document(Graph.open(str(base / p["root"])), bp,
-                                      title=name).get("refs", {})
+                refs = document_refs(bp)
         except Exception:
             refs = {}
         index[_project_handle(p)] = {"root": root, "name": name, "refs": refs}
@@ -816,11 +815,11 @@ def write_static_site(manifest: dict, *, base: Path, out_path: str | Path,
     """Write the whole site as static files: ``out_path`` (an ``index.html``)
     plus a sibling ``assets/`` dir copied from the
     pre-built frontend, the landing data injected as
-    ``window.__HGRAPH_DATA__``, and one ``<root>/data.json`` per project (see
-    :func:`hgraph.dashboard.project_data`) — everything the React
-    `ProjectView` route needs, fetched relative to wherever the page is
-    served from, no server required."""
-    from .dashboard import project_data, resolve_extrefs
+    ``window.__HGRAPH_DATA__``, and incremental project/chapter/graph JSON
+    payloads. ``data.json`` is retained for older frontend builds. Everything
+    is fetched relative to wherever the page is served from, so no server-side
+    API is required."""
+    from .dashboard import project_data, resolve_extrefs, split_project_data
     from .graph import Graph
 
     out_path = Path(out_path)
@@ -842,10 +841,24 @@ def write_static_site(manifest: dict, *, base: Path, out_path: str | Path,
     index = _extref_index_from(payloads)
     for p, data in payloads:
         data["extrefs"] = resolve_extrefs(data.get("chapters"), index)
+        shell, chapters, graph = split_project_data(data)
         data_dir = out_dir / str(p["root"]).strip("/")
         data_dir.mkdir(parents=True, exist_ok=True)
         (data_dir / "data.json").write_text(
             json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        (data_dir / "project.json").write_text(
+            json.dumps(shell, ensure_ascii=False), encoding="utf-8")
+        (data_dir / "graph.json").write_text(
+            json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+        (data_dir / "extrefs.json").write_text(
+            json.dumps(data.get("extrefs") or {}, ensure_ascii=False), encoding="utf-8")
+        chapter_dir = data_dir / "chapters"
+        chapter_dir.mkdir(parents=True, exist_ok=True)
+        for stale in chapter_dir.glob("*.json"):
+            stale.unlink()
+        for i, chapter in enumerate(chapters):
+            (chapter_dir / f"{i}.json").write_text(
+                json.dumps(chapter, ensure_ascii=False), encoding="utf-8")
 
     data = build_site_data(manifest, base=base, overview_html=overview_html)
     inject = f"<script>window.__HGRAPH_DATA__={json.dumps(data, ensure_ascii=False)}</script>\n    "

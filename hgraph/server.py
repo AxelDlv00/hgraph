@@ -2,18 +2,19 @@
 
 A tiny stdlib HTTP server: it serves the pre-built React frontend
 (``hgraph/webui``, see :mod:`hgraph.site`) and the JSON data it fetches —
-``GET /api/site`` (the workspace landing data) and ``GET /<root>/data.json``
-per project, both recomputed on every request so the live copy never goes
-stale — and accepts ``POST /<root>/api/review`` / ``/api/comment`` to attach
+``GET /api/site`` (the workspace landing data), a lightweight
+``GET /<root>/project.json`` shell, and lazy chapter/graph payloads. Signature
+caches keep the live copy current without rebuilding unchanged data. It also
+accepts ``POST /<root>/api/review`` / ``/api/comment`` to attach
 a review or comment straight into that project's graph, exactly like
 ``hgraph add review``/``hgraph add comment`` would.
 
 Two modes, auto-detected by ``hgraph/cli.py`` the same way ``hgraph site``
 picks a manifest:
 
-* **one project** (``serve``) — data at ``/data.json``, no mount prefix.
+* **one project** (``serve``) — payloads at the URL root, no mount prefix.
 * **a workspace** (``serve_workspace``) — the landing data at ``/api/site``,
-  each project's data + API mounted at ``/<root>/``.
+  each project's payloads + API mounted at ``/<root>/``.
 """
 
 from __future__ import annotations
@@ -24,8 +25,11 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote
 
-from .dashboard import _resolve_blueprint, project_data, resolve_extrefs
+from .dashboard import (_resolve_blueprint, hydrate_project_chapter,
+                        hydrate_project_data, hydrate_project_entries,
+                        project_source, resolve_extrefs)
 from .graph import Graph
 from .site import (WEBUI_DIR, build_extref_index, build_site_data,
                    render_index_html, _resolve_theme)
@@ -84,9 +88,9 @@ class _SigCache:
         self._sig_fn, self._build = sig, build
         self._lock = threading.Lock()
         self._sig: tuple | None = None
-        self._val: bytes | None = None
+        self._val = None
 
-    def get(self) -> bytes:
+    def get(self):
         sig = self._sig_fn()
         with self._lock:
             if self._val is None or sig != self._sig:
@@ -121,6 +125,51 @@ def _warm(*caches: _SigCache) -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
+def _json_bytes(value) -> bytes:
+    return json.dumps(value, ensure_ascii=False).encode("utf-8")
+
+
+def _project_parts(g: Graph, **kwargs) -> dict:
+    """Build a lightweight shell plus reusable hydration indexes."""
+    project = project_source(g, **kwargs)
+    chapter_count = len(project["data"].get("chapters") or [])
+    return {
+        "project": project,
+        "data": project["data"],
+        "shell": _json_bytes(project["shell"]),
+        "chapters": [None] * chapter_count,
+        "chapter_locks": [threading.Lock() for _ in range(chapter_count)],
+    }
+
+
+def _chapter_payload(parts: dict, g: Graph, index: int) -> bytes:
+    with parts["chapter_locks"][index]:
+        if parts["chapters"][index] is None:
+            chapter = hydrate_project_chapter(parts["project"], g, index)
+            parts["chapters"][index] = _json_bytes(chapter)
+        return parts["chapters"][index]
+
+
+def _graph_payload(parts: dict, g: Graph) -> bytes:
+    """Build the expensive layout only when the graph view is requested."""
+    from .layout import render_svgs
+    entries = hydrate_project_entries(parts["project"], g)
+    graph_data = {**parts["data"], "entries": entries}
+    return _json_bytes({"entries": entries, "gvsvg": render_svgs(graph_data)})
+
+
+def _full_payload(parts: dict, g: Graph) -> bytes:
+    return _json_bytes(hydrate_project_data(parts["project"], g))
+
+
+def _chapter_index(path: str) -> int | None:
+    prefix, suffix = "/chapters/", ".json"
+    if not path.startswith(prefix) or not path.endswith(suffix):
+        return None
+    raw = path[len(prefix):-len(suffix)]
+    return int(raw) if raw.isdigit() else None
+
+
 # content-hashed bundle files can be cached forever; everything else (data,
 # index.html) must always revalidate so live edits show up on reload
 _IMMUTABLE = "public, max-age=31536000, immutable"
@@ -153,6 +202,54 @@ def _apply_index_config(webui: dict[str, tuple[bytes, str]], manifest: dict,
     for key in ("/", "/index.html"):
         if key in webui:
             webui[key] = (idx, webui[key][1])
+
+
+def _static_mounts(manifest: dict, base: Path) -> list[tuple[str, Path]]:
+    """Resolve optional ``static: {route: directory}`` live-server mounts.
+
+    Routes are URL prefixes without ``api`` or ``assets``; directories are
+    relative to the workspace manifest.  The static exporter deliberately
+    remains separate: callers can build or copy these applications however
+    their deployment requires, while ``hgraph serve`` can preview them on the
+    same origin as the generated frontend.
+    """
+    raw = manifest.get("static") or {}
+    if not isinstance(raw, dict):
+        raise ValueError("manifest static: must be a route-to-directory mapping")
+
+    mounts: list[tuple[str, Path]] = []
+    for route, directory in raw.items():
+        route = str(route).strip("/")
+        if not route or route in {"api", "assets"} or "/" in route:
+            raise ValueError(f"invalid static route: {route!r}")
+        root = (base / str(directory)).resolve()
+        if not root.is_dir():
+            print(f"warning: static route /{route} directory not found: {root}")
+            continue
+        mounts.append((f"/{route}", root))
+    return mounts
+
+
+def _static_asset(mounts: list[tuple[str, Path]], path: str):
+    """Return ``(body, content_type, cache)`` for a mounted file, if any."""
+    decoded = unquote(path)
+    for prefix, root in mounts:
+        if decoded != prefix and not decoded.startswith(prefix + "/"):
+            continue
+        relative = decoded[len(prefix):].lstrip("/") or "index.html"
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+        if candidate.is_dir():
+            candidate = candidate / "index.html"
+        if not candidate.is_file():
+            return None
+        ctype = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        cache = _IMMUTABLE if "/assets/" in decoded else _NO_CACHE
+        return candidate.read_bytes(), ctype, cache
+    return None
 
 
 def _apply_attachment(g: Graph, kind: str, data: dict) -> dict:
@@ -202,12 +299,17 @@ def serve(g: Graph, *, host: str = "127.0.0.1", port: int = 8000,
         lambda: _tree_sig(*sig_paths, (Path(root) / overview) if overview else None),
         lambda: json.dumps(build_site_data(manifest, base=Path(root)),
                            ensure_ascii=False).encode("utf-8"))
-    data_cache = _SigCache(
+    parts_cache = _SigCache(
         lambda: _tree_sig(*sig_paths),
-        lambda: json.dumps(project_data(g, title=site_title, macros_from=macros_from,
-                                        root=root, repo=repo, theme=solo_theme),
-                           ensure_ascii=False).encode("utf-8"))
-    _warm(data_cache, site_cache)
+        lambda: _project_parts(g, title=site_title, macros_from=macros_from,
+                               root=root, repo=repo, theme=solo_theme))
+    graph_cache = _SigCache(
+        lambda: _tree_sig(*sig_paths),
+        lambda: _graph_payload(parts_cache.get(), g))
+    full_cache = _SigCache(
+        lambda: _tree_sig(*sig_paths),
+        lambda: _full_payload(parts_cache.get(), g))
+    _warm(site_cache)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):        # keep the console quiet
@@ -226,8 +328,20 @@ def serve(g: Graph, *, host: str = "127.0.0.1", port: int = 8000,
             path = self.path.split("?")[0].split("#")[0]
             if path == "/api/site":
                 return self._send(200, site_cache.get())
+            if path == "/project.json":
+                return self._send(200, parts_cache.get()["shell"])
+            chapter = _chapter_index(path)
+            if chapter is not None:
+                chapters = parts_cache.get()["chapters"]
+                if chapter < len(chapters):
+                    return self._send(200, _chapter_payload(parts_cache.get(), g, chapter))
+                return self._send(404, b'{"error":"chapter not found"}')
+            if path == "/graph.json":
+                return self._send(200, graph_cache.get())
+            if path == "/extrefs.json":
+                return self._send(200, b"{}")
             if path == "/data.json":
-                return self._send(200, data_cache.get())
+                return self._send(200, full_cache.get())
             if path in webui:
                 body, ctype = webui[path]
                 return self._send(200, body, ctype,
@@ -265,21 +379,30 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
     project."""
     webui = _load_webui_assets()
     _apply_index_config(webui, manifest, base)
+    static_mounts = _static_mounts(manifest, base)
 
-    # The cross-project `\citeext` index (handle -> label→number table). Keyed by
-    # every project's graph signature, so editing one project refreshes the
-    # numbers a sibling's citations resolve to. Built lazily and shared by all
-    # per-project payloads below.
+    # The cross-project `\citeext` index is its own lazy resource. Opening a
+    # project overview does not need it; the first full chapter starts this work.
     proots = [base / p["root"] for p in manifest.get("projects", [])]
+    index_paths = [path for proot in proots for path in _project_sig_paths(proot)]
     index_cache = _SigCache(
-        lambda: _tree_sig(*(pr / "hgraph" for pr in proots)),
+        lambda: _tree_sig(*index_paths),
         lambda: build_extref_index(manifest, base))
 
-    def _project_payload(s: dict) -> bytes:
-        data = project_data(s["g"], title=s["title"], root=str(s["root"]),
-                            repo=s["repo"], theme=s["theme"])
-        data["extrefs"] = resolve_extrefs(data.get("chapters"), index_cache.get())
-        return json.dumps(data, ensure_ascii=False).encode("utf-8")
+    def _workspace_parts(s: dict) -> dict:
+        return _project_parts(s["g"], title=s["title"], root=str(s["root"]),
+                              repo=s["repo"], theme=s["theme"])
+
+    def _workspace_extrefs(s: dict) -> dict:
+        refs = resolve_extrefs(s["parts"].get()["data"].get("chapters"),
+                               index_cache.get())
+        return {"data": refs, "body": _json_bytes(refs)}
+
+    def _workspace_full(s: dict) -> bytes:
+        parts = s["parts"].get()
+        data = hydrate_project_data(parts["project"], s["g"])
+        data["extrefs"] = s["extrefs"].get()["data"]
+        return _json_bytes(data)
 
     mounted: dict[str, dict] = {}
     for p in manifest.get("projects", []):
@@ -290,9 +413,19 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
             "repo": p.get("repo") or manifest.get("repo"), "root": proot,
             "theme": _resolve_theme(p, manifest, base),
         }
-        state["cache"] = _SigCache(
-            (lambda pr=proot: _tree_sig(*_project_sig_paths(pr))),
-            (lambda s=state: _project_payload(s)))
+        project_sig = (lambda pr=proot: _tree_sig(*_project_sig_paths(pr)))
+        state["parts"] = _SigCache(
+            project_sig,
+            (lambda s=state: _workspace_parts(s)))
+        state["graph"] = _SigCache(
+            project_sig,
+            (lambda s=state: _graph_payload(s["parts"].get(), s["g"])))
+        state["extrefs"] = _SigCache(
+            (lambda: _tree_sig(*index_paths)),
+            (lambda s=state: _workspace_extrefs(s)))
+        state["full"] = _SigCache(
+            (lambda: _tree_sig(*index_paths)),
+            (lambda s=state: _workspace_full(s)))
         mounted[prefix] = state
 
     overview = manifest.get("overview")
@@ -304,7 +437,7 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
     # landing first: it is the page a visitor sees on arrival, so warming it
     # ahead of the per-project payloads means a first hit during startup waits
     # on one project's worth of work, not all of them.
-    _warm(site_cache, *(s["cache"] for s in mounted.values()))
+    _warm(site_cache)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -339,9 +472,26 @@ def serve_workspace(manifest: dict, base: Path, *, host: str = "127.0.0.1",
                 body, ctype = webui[path]
                 return self._send(200, body, ctype,
                                   cache=_IMMUTABLE if path.startswith("/assets/") else _NO_CACHE)
+            static = _static_asset(static_mounts, path)
+            if static is not None:
+                body, ctype, cache = static
+                return self._send(200, body, ctype, cache=cache)
             state, sub = self._mount()
+            if state is not None and sub == "/project.json":
+                return self._send(200, state["parts"].get()["shell"])
+            chapter = _chapter_index(sub) if state is not None else None
+            if state is not None and chapter is not None:
+                chapters = state["parts"].get()["chapters"]
+                if chapter < len(chapters):
+                    return self._send(200, _chapter_payload(
+                        state["parts"].get(), state["g"], chapter))
+                return self._send(404, b'{"error":"chapter not found"}')
+            if state is not None and sub == "/graph.json":
+                return self._send(200, state["graph"].get())
+            if state is not None and sub == "/extrefs.json":
+                return self._send(200, state["extrefs"].get()["body"])
             if state is not None and sub == "/data.json":
-                return self._send(200, state["cache"].get())
+                return self._send(200, state["full"].get())
             self._send(404, b'{"error":"not found"}')
 
         def do_POST(self):

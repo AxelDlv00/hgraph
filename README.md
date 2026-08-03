@@ -201,6 +201,11 @@ reviews and comments to be written back to disk. `hgraph site` exports the same
 interface as static files; its review form can instead open a prefilled GitHub
 issue when the project config includes `repo: owner/name`.
 
+Both modes open projects from a lightweight outline, then load full chapters,
+cross-project references, review controls, and the dependency graph only when
+the corresponding view needs them. Cross-chapter search fetches the remaining
+chapters concurrently.
+
 A project can customize its card and overview in `hgraph/config.yaml`:
 
 ```yaml

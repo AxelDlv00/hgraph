@@ -51,6 +51,11 @@ const lastTypeset = new WeakMap<HTMLElement, Node | null>();
 export function typesetMath(el: HTMLElement, macros?: Record<string, string>): void {
   if (lastTypeset.has(el) && lastTypeset.get(el) === el.firstChild) return;
   if (macros) Object.assign(sessionMacros, macros);
+  const text = el.textContent || '';
+  if (!text.includes('$') && !text.includes('\\(') && !text.includes('\\[')) {
+    lastTypeset.set(el, el.firstChild);
+    return;
+  }
   getRenderer().then((render) => {
     if (!el.isConnected) return; // unmounted while KaTeX was still loading
     try {

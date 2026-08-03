@@ -8,7 +8,7 @@ ships the already-built output at `../hgraph/webui/`.
 
 ```bash
 npm install
-npm run dev      # local dev server with HMR (fetches /api/site, /<root>/data.json
+npm run dev      # local dev server with HMR (fetches /api/site, /<root>/project.json
                   # from nowhere useful on its own — point it at a running
                   # `hgraph serve` if you need real data)
 npm run build    # writes straight into ../hgraph/webui/ (outDir in vite.config.ts)
@@ -18,9 +18,10 @@ npm run build    # writes straight into ../hgraph/webui/ (outDir in vite.config.
 `hgraph/webui/` output** — that's the artifact that actually ships.
 
 Data contracts: `src/types.ts` — `SiteData` (landing, `window.__HGRAPH_DATA__`
-or `GET /api/site`) and `ProjectData` (`<root>/data.json`, written by
-`hgraph.dashboard.project_data`). Python only ever emits these two JSON
-shapes; every bit of rendering — math (`katex/contrib/auto-render`), Lean
+or `GET /api/site`) and `ProjectData` (`<root>/project.json`, followed by its
+versioned `lazy` chapter/graph paths). A monolithic `<root>/data.json` remains
+as a compatibility fallback. Every bit of rendering — math
+(`katex/contrib/auto-render`), Lean
 code, dependency chips, the review form — lives here.
 
 Scope note: the project view (`ProjectView.tsx`) covers everything the old

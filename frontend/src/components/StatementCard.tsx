@@ -1,10 +1,14 @@
+import { lazy, Suspense } from 'react';
 import type { Entry, Dep, RefEntry } from '../types';
 import { leanHi, type CiteNums } from '../latex';
 import { Math as Tex } from './Tex';
 import { StatusBadge } from './StatusBadge';
-import { Reviews } from './Reviews';
 import { localDepGraph } from '../depgraph';
 import { BookOpen } from 'lucide-react';
+
+const Reviews = lazy(() =>
+  import('./Reviews').then((module) => ({ default: module.Reviews })),
+);
 
 const ABBR: Record<string, string> = {
   definition: 'Def', lemma: 'Lem', theorem: 'Thm', proposition: 'Prop',
@@ -118,7 +122,9 @@ export function StatementCard({
       <h3>Dependencies</h3>
       <div dangerouslySetInnerHTML={{ __html: localDepGraph(entry, ups, downs, true) }} />
 
-      <Reviews root={root} target={entry} reviews={entry.reviews} comments={entry.comments} repo={repo} />
+      <Suspense fallback={<div className="stmt-reviews">Loading reviews…</div>}>
+        <Reviews root={root} target={entry} reviews={entry.reviews} comments={entry.comments} repo={repo} />
+      </Suspense>
     </div>
   );
 }
