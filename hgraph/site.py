@@ -41,6 +41,8 @@ Manifest schema (paths are resolved relative to the manifest file)::
                                       # URI, or an emoji (🌀) drawn onto an SVG
     overview: overview.md            # optional fragment injected below the hero
                                       # (.md is converted; .html is used verbatim)
+    stylesheet: site/theme.css       # optional CSS file (or list of files),
+                                      # inlined into every landing/project view
     tabs:                            # optional — extra content tabs on the landing
       - id: people                   # page, beside Projects/Overview. Each names a
         label: People                # .md/.html file (converted like `overview:`)
@@ -469,6 +471,31 @@ def _favicon_link(value, *, base: Path) -> str:
     return f'<link rel="icon"{type_attr} href="{_esc(href)}" />'
 
 
+def _stylesheet_tag(value, *, base: Path) -> str:
+    """Inline one or more manifest ``stylesheet:`` files into the page head.
+
+    Inlining keeps the same override active for static exports and live
+    ``hgraph serve`` pages, including project routes that replace the landing
+    view. The file is workspace-authored CSS, so it is intentionally preserved
+    verbatim rather than passed through the Markdown renderer.
+    """
+    if value is None:
+        return ""
+    paths = [value] if isinstance(value, str) else value
+    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        raise HGraphError("stylesheet: must be a path or list of paths")
+    chunks: list[str] = []
+    for source in paths:
+        path = (base / source).resolve()
+        if not path.is_file():
+            print(f"warning: stylesheet not found, ignoring: {path}")
+            continue
+        chunks.append(path.read_text(encoding="utf-8"))
+    if not chunks:
+        return ""
+    return '<style data-hgraph-stylesheet>\n' + "\n".join(chunks) + "\n</style>"
+
+
 def render_index_html(manifest: dict, *, base: Path, data_script: str = "") -> str:
     """The shipped webui ``index.html`` with this manifest's tab title and
     favicon applied — and, for the static export, the site-data ``<script>``
@@ -478,6 +505,7 @@ def render_index_html(manifest: dict, *, base: Path, data_script: str = "") -> s
     * ``tab_title:`` sets the ``<title>`` (the browser-tab text); it falls back
       to ``brand:``, then ``title:``, then ``hgraph``.
     * ``favicon:`` sets the tab icon (see :func:`_favicon_source`).
+    * ``stylesheet:`` inlines workspace CSS into every route.
     """
     html_text = (WEBUI_DIR / "index.html").read_text(encoding="utf-8")
     tab_title = (manifest.get("tab_title") or manifest.get("brand")
@@ -485,8 +513,10 @@ def render_index_html(manifest: dict, *, base: Path, data_script: str = "") -> s
     html_text = html_text.replace("<title>hgraph</title>",
                                   f"<title>{_esc(tab_title)}</title>", 1)
     icon = _favicon_link(manifest.get("favicon"), base=base)
-    if icon:
-        html_text = html_text.replace("<title>", icon + "\n    <title>", 1)
+    stylesheet = _stylesheet_tag(manifest.get("stylesheet"), base=base)
+    head_inserts = "\n".join(part for part in (icon, stylesheet) if part)
+    if head_inserts:
+        html_text = html_text.replace("<title>", head_inserts + "\n    <title>", 1)
     if data_script:
         html_text = html_text.replace("<!-- __HGRAPH_DATA__:",
                                       data_script + "<!-- __HGRAPH_DATA__:", 1)

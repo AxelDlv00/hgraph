@@ -223,6 +223,7 @@ To combine projects, place a workspace `config.yaml` beside their directories:
 ```yaml
 title: My workspace
 overview: overview.md
+stylesheet: site/theme.css
 projects:
   - name: Project A
     root: a
@@ -276,6 +277,15 @@ projects:
   - name: Project B
     root: b
     theme: { accent: '#058476', pillText: '#058476' }   # any subset; rest derived
+```
+
+**Workspace stylesheet.** A workspace manifest may set `stylesheet:` to one CSS
+file or a list of files. hgraph inlines the contents into the document head, so
+the override applies to the landing page and every project route in both static
+exports and `hgraph serve`:
+
+```yaml
+stylesheet: site/theme.css
 ```
 
 **Custom blueprint tabs.** A project can add its own tabs to the blueprint view

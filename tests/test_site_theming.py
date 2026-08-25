@@ -12,6 +12,7 @@ from hgraph.site import (
     _derive_theme,
     _norm_hex,
     _resolve_theme,
+    _stylesheet_tag,
     _theme_of,
     build_site_data,
 )
@@ -158,6 +159,32 @@ class ContentTabsTests(unittest.TestCase):
 
     def test_empty_is_empty(self):
         self.assertEqual(_content_tabs(None, base=Path("."), where="manifest"), [])
+
+
+class StylesheetTests(unittest.TestCase):
+    def test_inlines_one_stylesheet(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            (base / "theme.css").write_text("body { color: red; }", encoding="utf-8")
+            tag = _stylesheet_tag("theme.css", base=base)
+            self.assertIn('data-hgraph-stylesheet', tag)
+            self.assertIn('body { color: red; }', tag)
+
+    def test_inlines_a_list(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            (base / "a.css").write_text(".a {}", encoding="utf-8")
+            (base / "b.css").write_text(".b {}", encoding="utf-8")
+            tag = _stylesheet_tag(["a.css", "b.css"], base=base)
+            self.assertLess(tag.index('.a {}'), tag.index('.b {}'))
+
+    def test_missing_stylesheet_warns_and_is_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                tag = _stylesheet_tag("missing.css", base=Path(d))
+            self.assertEqual(tag, '')
+            self.assertIn('stylesheet not found', buf.getvalue())
 
 
 class BuildSiteDataTests(unittest.TestCase):
