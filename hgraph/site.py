@@ -65,7 +65,8 @@ Manifest schema (paths are resolved relative to the manifest file)::
                                       # category with no entry has no subtitle
     projects:
       - name: Riemannian Geometry (do Carmo)
-        root: DoCarmo                # dir containing hgraph/
+        root: DoCarmo                # route directory containing hgraph/
+        planned: true                # optional — scaffold route with no sources yet
         category: Differential Geometry  # optional — projects sharing a category
                                           # render grouped under one heading; a
                                           # manifest that never sets it renders one

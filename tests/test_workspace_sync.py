@@ -12,7 +12,7 @@ import yaml
 import hgraph.cli as cli
 from hgraph.cli import main
 from hgraph.graph import Graph, node_id
-from hgraph.sync import project_sync_status, sync_from_config
+from hgraph.sync import project_sync_status, sync_from_config, workspace_sync_status
 
 
 def _await_serve_preflight() -> None:
@@ -121,6 +121,43 @@ class WorkspaceSyncTests(unittest.TestCase):
             self.assertIn("2 synced, 0 skipped, 0 failed", stdout.getvalue())
             for root in roots:
                 self.assertTrue(Graph.open(root).has_node(node_id("bp", "first")))
+
+    def test_planned_workspace_project_is_not_treated_as_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            (workspace / "config.yaml").write_text(yaml.safe_dump({
+                "title": "Test workspace",
+                "projects": [{"name": "Future", "root": "future", "planned": True}],
+            }, sort_keys=False), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = main(["--root", str(workspace), "sync"])
+
+            self.assertEqual(code, 0)
+            self.assertIn("[planned] Future", stdout.getvalue())
+            self.assertIn("0 synced, 1 planned, 0 skipped, 0 failed", stdout.getvalue())
+            status = workspace_sync_status(
+                yaml.safe_load((workspace / "config.yaml").read_text()), workspace)
+            self.assertEqual(status[0]["state"], "planned")
+
+    def test_planned_workspace_project_does_not_warn_before_serve(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            (workspace / "config.yaml").write_text(yaml.safe_dump({
+                "title": "Test workspace",
+                "projects": [{"name": "Future", "root": "future", "planned": True}],
+            }, sort_keys=False), encoding="utf-8")
+
+            stderr = io.StringIO()
+            with mock.patch("hgraph.server.serve_workspace") as serve, \
+                    contextlib.redirect_stderr(stderr):
+                code = main(["--root", str(workspace), "serve"])
+                _await_serve_preflight()
+
+            self.assertEqual(code, 0)
+            serve.assert_called_once()
+            self.assertEqual(stderr.getvalue(), "")
 
     def test_status_uses_sync_rules_without_writing(self):
         with tempfile.TemporaryDirectory() as td:

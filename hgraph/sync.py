@@ -903,7 +903,11 @@ def project_sync_status(root: str | Path) -> dict:
 
 
 def workspace_sync_status(manifest: dict, base: str | Path) -> list[dict]:
-    """Return :func:`project_sync_status` for every project in a manifest."""
+    """Return :func:`project_sync_status` for every project in a manifest.
+
+    A manifest entry with ``planned: true`` is an intentional empty route. It
+    does not need a project-local ``hgraph/`` directory until sources exist.
+    """
     projects = manifest.get("projects") if isinstance(manifest, dict) else None
     if not isinstance(projects, list):
         raise HGraphError("workspace manifest needs a projects: list")
@@ -911,6 +915,12 @@ def workspace_sync_status(manifest: dict, base: str | Path) -> list[dict]:
     for project in projects:
         if not isinstance(project, dict) or project.get("root") is None:
             raise HGraphError("each workspace project needs a root:")
+        if project.get("planned") is True:
+            out.append({"name": project.get("name") or str(project["root"]),
+                        "root": str(project["root"]),
+                        "state": "planned",
+                        "message": "planned route (no blueprint/Lean sources yet)"})
+            continue
         root = Path(base) / str(project["root"])
         out.append({"name": project.get("name") or str(project["root"]),
                     "root": str(project["root"]),

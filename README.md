@@ -225,10 +225,11 @@ title: My workspace
 overview: overview.md
 stylesheet: site/theme.css
 projects:
-  - name: Project A
-    root: a
-    category: Examples
-    blurb: A one-line description.
+      - name: Project A
+        root: a
+        planned: true                 # scaffold route; no hgraph/ sources yet
+        category: Examples
+        blurb: A one-line description.
 ```
 
 From that directory, `hgraph sync`, `hgraph serve`, and `hgraph site` discover
@@ -287,6 +288,11 @@ exports and `hgraph serve`:
 ```yaml
 stylesheet: site/theme.css
 ```
+
+**Planned routes.** A project entry may set `planned: true` while its directory
+is only a structural placeholder. `hgraph sync` reports it as planned and
+`hgraph serve` does not warn about the absence of a project-local `hgraph/`
+directory. Remove the flag when adding blueprint or Lean sources.
 
 **Custom blueprint tabs.** A project can add its own tabs to the blueprint view
 (beside Overview / Summary / Graph) from its `hgraph/config.yaml`:

@@ -640,6 +640,7 @@ def main(argv=None) -> int:
                 failures = 0
                 synced = 0
                 skipped = 0
+                planned = 0
                 warning_total = 0
                 style = _SyncStyle(args.color, sys.stdout)
                 print(style.bold(f"Syncing {_count(len(projects), 'workspace project')} "
@@ -647,6 +648,11 @@ def main(argv=None) -> int:
                 for project in projects:
                     name = project.get("name") or str(project["root"])
                     proot = manifest_path.parent / str(project["root"])
+                    if project.get("planned") is True:
+                        planned += 1
+                        print(f"  {style.green('[planned]')} {name}: no blueprint/Lean "
+                              "sources yet", flush=True)
+                        continue
                     try:
                         cfg = load_config(proot)
                         if not cfg["blueprint"] and not cfg["lean"]:
@@ -665,8 +671,10 @@ def main(argv=None) -> int:
                     warning_total += _render_warning_summary(
                         result["warnings"], stream=sys.stdout, style=style, indent="    ",
                         verbose=args.verbose, lean_count=result["lean"])
-                summary = (f"Workspace sync complete: {synced:,} synced, {skipped:,} skipped, "
-                           f"{failures:,} failed, {_count(warning_total, 'warning')}")
+                planned_part = f"{planned:,} planned, " if planned else ""
+                summary = (f"Workspace sync complete: {synced:,} synced, "
+                           f"{planned_part}{skipped:,} skipped, {failures:,} failed, "
+                           f"{_count(warning_total, 'warning')}")
                 summary_style = style.red if failures else style.yellow if warning_total else style.green
                 print(summary_style(summary), flush=True)
                 return 1 if failures else 0
