@@ -515,9 +515,12 @@ def render_index_html(manifest: dict, *, base: Path, data_script: str = "") -> s
                                   f"<title>{_esc(tab_title)}</title>", 1)
     icon = _favicon_link(manifest.get("favicon"), base=base)
     stylesheet = _stylesheet_tag(manifest.get("stylesheet"), base=base)
-    head_inserts = "\n".join(part for part in (icon, stylesheet) if part)
-    if head_inserts:
-        html_text = html_text.replace("<title>", head_inserts + "\n    <title>", 1)
+    if icon:
+        html_text = html_text.replace("<title>", icon + "\n    <title>", 1)
+    # Keep the workspace override after the bundled stylesheet. Inserting it
+    # before the link lets the frontend's light-theme rules win the cascade.
+    if stylesheet:
+        html_text = html_text.replace("</head>", stylesheet + "\n  </head>", 1)
     if data_script:
         html_text = html_text.replace("<!-- __HGRAPH_DATA__:",
                                       data_script + "<!-- __HGRAPH_DATA__:", 1)

@@ -12,6 +12,7 @@ from hgraph.site import (
     _derive_theme,
     _norm_hex,
     _resolve_theme,
+    render_index_html,
     _stylesheet_tag,
     _theme_of,
     build_site_data,
@@ -185,6 +186,15 @@ class StylesheetTests(unittest.TestCase):
                 tag = _stylesheet_tag("missing.css", base=Path(d))
             self.assertEqual(tag, '')
             self.assertIn('stylesheet not found', buf.getvalue())
+
+    def test_rendered_override_follows_bundled_css(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            (base / "theme.css").write_text("body { color: red; }", encoding="utf-8")
+            html = render_index_html(
+                {"title": "Theme", "stylesheet": "theme.css"}, base=base)
+            self.assertLess(html.index('<link rel="stylesheet"'),
+                            html.index('data-hgraph-stylesheet'))
 
 
 class BuildSiteDataTests(unittest.TestCase):
