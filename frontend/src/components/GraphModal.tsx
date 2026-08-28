@@ -351,7 +351,8 @@ export function GraphModal({
         onSelect(null);
         setExpanded(new Set([Number(m[1])]));
       } else if (model.idx.has(id)) {
-        onSelect(id);
+        // click the already-selected node again → deselect
+        onSelect(id === selectedId ? null : id);
       }
       return;
     }
