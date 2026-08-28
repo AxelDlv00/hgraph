@@ -212,17 +212,25 @@ export function chapterNodeId(ch: number): string {
 export const CHAPTER_ID_RE = /^ch(\d+)$/;
 
 /**
- * Graphviz attrs for a clean layered DAG (FLT-style): straight edges between
- * adjacent ranks, generous spacing, no spline routing through the pack.
+ * Graphviz attrs for an FLT-style layered DAG:
+ * - free placement (no cluster box) so `dot` can minimise crossings and
+ *   route edges *around* nodes;
+ * - `splines=true` (Graphviz default routing) — mild curves are fine; the
+ *   hard requirement is no edge through a node;
+ * - higher `mclimit` / `searchsize` so the barycentric order has more budget.
+ *
+ * Note: `subgraph cluster_*` forces Graphviz to fall back to straight line
+ * segments ("splines and cluster edges not supported"), which is exactly
+ * the edge-through-node look we had before. Expanded chapters stay free.
  */
 const DOT_GRAPH_ATTRS =
-  'rankdir=TB;bgcolor="transparent";newrank=true;splines=line;overlap=false;' +
-  'nodesep=0.55;ranksep=0.85;ordering=out;';
+  'rankdir=TB;bgcolor="transparent";splines=true;overlap=false;' +
+  'nodesep=0.55;ranksep=0.85;mclimit=4;searchsize=100;';
 
 /**
  * Drop edges implied by a longer path (transitive reduction) on a digraph
  * given as directed pairs `from -> to`. Keeps the covering / Hasse edges so
- * Graphviz draws short, local arrows instead of a hairball of long chords.
+ * Graphviz lays out short, local arrows instead of a hairball of long chords.
  */
 function transitiveReduction(edges: Array<[string, string, string]>): Array<[string, string, string]> {
   const succ = new Map<string, Set<string>>();
@@ -255,9 +263,9 @@ function transitiveReduction(edges: Array<[string, string, string]>): Array<[str
  * - Overview (`expanded` empty): one purple super-node per chapter, edges only
  *   between chapters (aggregated cross-chapter dependencies). Matches the
  *   precomputed SVG from `hgraph.layout._dot_chapter_overview`.
- * - Expanded chapter(s): **only those chapters' nodes**, with a **transitive
- *   reduction** of intra-chapter edges and straight-line splines — the layout
- *   that keeps arrows short and local (as in a clean FLT-style DAG).
+ * - Expanded chapter(s): **only those chapters' nodes** (no cluster frame —
+ *   free Sugiyama placement), with a **transitive reduction** of intra-chapter
+ *   edges and spline routing around nodes (FLT-style).
  *
  * Regenerate (and re-render via Graphviz) on every expand/collapse/level
  * change; never hide/show a stale layout.
@@ -275,22 +283,27 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
   s += `  edge [color="${GRAPH.edge}",arrowhead=vee,arrowsize=0.75,penwidth=1];\n`;
   s += '  graph [fontname="Helvetica",fontsize=13,labeljust="l"];\n';
 
-  // ---- expanded: only the open chapter(s), reduced intra-chapter edges -----
+  // ---- expanded: free layout of the open chapter(s) only --------------------
   if (expanded.size > 0) {
     const visible = new Set<string>();
+    const titles: string[] = [];
     model.chapters.forEach((stat, ch) => {
       if (!stat.count || !expanded.has(ch)) return;
-      s += `  subgraph cluster_${ch} {\n    label="${gvEsc(stat.label + '  (click background to close)')}";style="rounded,filled";fillcolor="${GRAPH.expandedFill}";color="${GRAPH.clusterBorder}";penwidth=2.4;fontcolor="${GRAPH.expandedText}";fontsize=12.5;\n`;
+      titles.push(stat.label);
+      // Free nodes (no cluster_*): Graphviz can place ranks and route splines
+      // around nodes. Chapter title is a graph label; close via "All chapters".
       (byCh.get(ch) || [])
         .filter((n) => n.lvl <= lvlMax)
         .forEach((n) => {
           visible.add(n.id);
           const st = nodeStyle(n);
           const def = isDefKind(n.e.kind);
-          s += `    "${n.id}" [shape=${def ? 'box' : 'ellipse'},style=${def ? '"rounded,filled"' : '"filled"'},fillcolor="${st.f}",color="${st.b}",fontcolor="${GRAPH.nodeText}",label="${dotLabel(n.e.title || n.e.label || n.e.id)}"];\n`;
+          s += `  "${n.id}" [shape=${def ? 'box' : 'ellipse'},style=${def ? '"rounded,filled"' : '"filled"'},fillcolor="${st.f}",color="${st.b}",fontcolor="${GRAPH.nodeText}",label="${dotLabel(n.e.title || n.e.label || n.e.id)}"];\n`;
         });
-      s += '  }\n';
     });
+    if (titles.length) {
+      s += `  graph [label="${gvEsc(titles.join(' · ') + '  (All chapters to close)')}",labelloc=t,fontsize=12.5,fontcolor="${GRAPH.expandedText}"];\n`;
+    }
     // model edge [source, target]: source *uses* target → draw target -> source
     const drawn: Array<[string, string, string]> = [];
     const seenEdge = new Set<string>();

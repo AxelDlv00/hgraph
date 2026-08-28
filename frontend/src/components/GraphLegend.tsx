@@ -29,7 +29,7 @@ export function GraphLegend({ mode }: { mode: 'collapsed' | 'full' }) {
       <div className="lgsec">Chapters</div>
       <div className="lg">
         <i className="lgf" style={{ background: GRAPH.clusterFill, border: `2px solid ${GRAPH.clusterBorder}` }} />
-        {mode === 'collapsed' ? 'collapsed — click to open the full graph' : 'one cluster per chapter'}
+        {mode === 'collapsed' ? 'collapsed — click to open the full graph' : 'statements of the open chapter'}
       </div>
 
       <div className="lgsec">Shape</div>

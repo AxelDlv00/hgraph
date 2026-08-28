@@ -242,21 +242,23 @@ def _dot_clustered(m: _Model, unit_of, n_units: int, label_fn) -> str:
     by_u: dict[int, list[int]] = {}
     for i in range(m.n):
         by_u.setdefault(unit_of[i], []).append(i)
+    # Free layout (no cluster_* frames): Graphviz falls back to straight line
+    # segments inside clusters, which cuts edges through nodes. Unit labels
+    # stay as a graph title instead. Attrs lockstep with graphDot.ts.
     out = ['strict digraph "" {',
-           '  rankdir=TB;bgcolor="transparent";newrank=true;splines=line;overlap=false;'
-           'nodesep=0.55;ranksep=0.85;ordering=out;',
+           '  rankdir=TB;bgcolor="transparent";splines=true;overlap=false;'
+           'nodesep=0.55;ranksep=0.85;mclimit=4;searchsize=100;',
            '  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=11,margin="0.11,0.05",penwidth=1.8];',
            '  edge [color="' + _EDGE + '",arrowhead=vee,arrowsize=0.7,penwidth=1];',
            '  graph [fontname="Helvetica",fontsize=13,labeljust="l"];']
+    labels = []
     for u in sorted(by_u):
-        out.append('  subgraph cluster_%d {' % u)
-        out.append('    label="%s";style="rounded,filled";fillcolor="%s";'
-                   'color="%s";penwidth=1.4;fontcolor="%s";'
-                   % (_gv_esc(label_fn(u)), _GROUP_CLUSTER["fill"],
-                      _GROUP_CLUSTER["border"], _GROUP_CLUSTER["text"]))
+        labels.append(label_fn(u))
         for i in by_u[u]:
-            out.append('    ' + m._node_line(i))
-        out.append('  }')
+            out.append('  ' + m._node_line(i))
+    if labels:
+        out.append('  graph [label="%s",labelloc=t,fontsize=12.5,fontcolor="%s"];'
+                   % (_gv_esc(" · ".join(labels)), _GROUP_CLUSTER["text"]))
     for si, ti, ty in m.edges:
         out.append('  "%s" -> "%s"%s;' % (m.ids[ti], m.ids[si], ' [style=dashed]' if ty == "uses" else ''))
     out.append('}')
@@ -302,8 +304,8 @@ def _dot_overview(m: _Model, unit_of, n_units: int, label_fn, id_prefix: str) ->
     reduced = {(b, a): w for (b, a), w in em.items()
                if not _reaches_without_direct(b, a)}
     out = ['strict digraph "" {',
-           '  rankdir=TB;bgcolor="transparent";newrank=true;splines=line;overlap=false;'
-           'nodesep=0.55;ranksep=0.85;ordering=out;',
+           '  rankdir=TB;bgcolor="transparent";splines=true;overlap=false;'
+           'nodesep=0.55;ranksep=0.85;mclimit=4;searchsize=100;',
            '  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=12,margin="0.2,0.13",penwidth=1.8];',
            '  edge [color="' + _EDGE + '",arrowhead=vee,arrowsize=0.85,penwidth=1.2];',
            '  graph [fontname="Helvetica"];']

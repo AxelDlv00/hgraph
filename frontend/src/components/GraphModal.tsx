@@ -25,11 +25,11 @@ function statusPasses(e: Entry, statusFilter: ReadonlySet<string>, q: string): b
 /**
  * The full-screen dependency-graph overlay — ported from the original's
  * `#graphmodal`. Every chapter starts collapsed into one purple aggregate
- * box; clicking one opens it into its statements while every *other* chapter
- * stays a box, so cross-chapter edges still land somewhere visible. Exactly
- * one chapter is open at a time — opening another switches to it, and
- * clicking the open chapter's background closes it again. Each
- * expand/collapse/detail-level change regenerates a fresh DOT graph and
+ * box; clicking one opens **only that chapter's statements** (free Sugiyama
+ * placement, spline edges routed around nodes — no cluster frame, because
+ * Graphviz cannot route splines inside clusters). Exactly one chapter is
+ * open at a time — use "Open a chapter…" to switch, "All chapters" to close.
+ * Each expand/collapse/detail-level change regenerates a fresh DOT graph and
  * re-lays it out with Graphviz — a real re-layout, not hide/show on a stale
  * one — in a Web Worker (see vizInstance.ts), cached per DOT string, and
  * prefetched per chapter in idle time, so opening a chapter is usually
@@ -424,7 +424,7 @@ export function GraphModal({
   const hint =
     (expanded.size === 0
       ? 'click a chapter to open it'
-      : 'click a node to open it · click another chapter to switch to it, or this one’s background to close it') +
+      : 'click a node to open it · use Open a chapter… to switch · All chapters to close') +
     ' · drag or scroll to pan · pinch or ctrl+scroll to zoom';
 
   return (
