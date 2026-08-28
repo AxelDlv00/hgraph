@@ -211,23 +211,24 @@ export function chapterNodeId(ch: number): string {
 }
 export const CHAPTER_ID_RE = /^ch(\d+)$/;
 
-/** Where an edge endpoint should resolve to for the *current* expand/level
- * state: its own id if the node is visible (its chapter is expanded and its
- * level passes the filter), its chapter's aggregate box id if collapsed, or
- * `null` if it's hidden entirely (expanded but filtered out by level) — the
- * edge is then dropped. Mirrors the original's `gmDispId`. */
-function dispId(n: GNode, expanded: ReadonlySet<number>, lvlMax: number): string | null {
-  if (expanded.has(n.ch)) return n.lvl <= lvlMax ? n.id : null;
-  return chapterNodeId(n.ch);
-}
+/** Graphviz attrs tuned for short dependency edges inside one chapter. */
+const DOT_GRAPH_ATTRS =
+  'rankdir=TB;bgcolor="transparent";newrank=true;splines=true;overlap=false;' +
+  'nodesep=0.5;ranksep=0.7;ordering=out;';
 
-/** The one graph: every chapter not in `expanded` is a single purple
- * aggregate box (`ch<N>`, click -> expand); every chapter IN `expanded` is a
- * real `subgraph cluster_<N>` containing its individual nodes, filtered by
- * `lvlMax`. Edges always resolve to whatever's currently visible. Ported
- * from the original's `gmDotMixed` — regenerate this (and re-render via
- * Graphviz) on every expand/collapse/level change, never hide/show a stale
- * layout. */
+/**
+ * Build the chapter-collapsed Graphviz DOT.
+ *
+ * - Overview (`expanded` empty): one purple super-node per chapter, edges only
+ *   between chapters (aggregated cross-chapter dependencies). Matches the
+ *   precomputed SVG from `hgraph.layout._dot_chapter_overview`.
+ * - Expanded chapter(s): **only those chapters' nodes and intra-chapter edges**.
+ *   Collapsed chapters are *not* drawn as peer nodes — cross-chapter edges to
+ *   them used to pull long curved routes across the canvas and wreck layout.
+ *
+ * Regenerate (and re-render via Graphviz) on every expand/collapse/level
+ * change; never hide/show a stale layout.
+ */
 export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMax: number): string {
   const byCh = new Map<number, GNode[]>();
   model.nodes.forEach((n) => {
@@ -236,40 +237,61 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
   });
 
   let s = 'strict digraph "" {\n';
-  s += '  rankdir=TB;bgcolor="transparent";pack=true;packmode="clust";splines=true;nodesep=0.4;ranksep=0.6;\n';
+  s += `  ${DOT_GRAPH_ATTRS}\n`;
   s += '  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=11,margin="0.11,0.05",penwidth=1.8];\n';
   s += `  edge [color="${GRAPH.edge}",arrowhead=vee,arrowsize=0.8,penwidth=1];\n`;
   s += '  graph [fontname="Helvetica",fontsize=13,labeljust="l"];\n';
 
-  model.chapters.forEach((stat, ch) => {
-    if (!stat.count) return;
-    if (expanded.has(ch)) {
+  // ---- expanded: only the open chapter(s), intra-chapter edges only --------
+  if (expanded.size > 0) {
+    const visible = new Set<string>();
+    model.chapters.forEach((stat, ch) => {
+      if (!stat.count || !expanded.has(ch)) return;
       s += `  subgraph cluster_${ch} {\n    label="${gvEsc(stat.label + '  (click background to close)')}";style="rounded,filled";fillcolor="${GRAPH.expandedFill}";color="${GRAPH.clusterBorder}";penwidth=2.4;fontcolor="${GRAPH.expandedText}";fontsize=12.5;\n`;
       (byCh.get(ch) || [])
         .filter((n) => n.lvl <= lvlMax)
         .forEach((n) => {
+          visible.add(n.id);
           const st = nodeStyle(n);
           const def = isDefKind(n.e.kind);
           s += `    "${n.id}" [shape=${def ? 'box' : 'ellipse'},style=${def ? '"rounded,filled"' : '"filled"'},fillcolor="${st.f}",color="${st.b}",fontcolor="${GRAPH.nodeText}",label="${dotLabel(n.e.title || n.e.label || n.e.id)}"];\n`;
         });
       s += '  }\n';
-    } else {
-      const pct = Math.round((100 * stat.done) / stat.count);
-      s += `  "ch${ch}" [label="${gvEsc(stat.label)}\\n${stat.count} statements · ${pct}%",fillcolor="${GRAPH.clusterFill}",color="${GRAPH.clusterBorder}",penwidth=2.6,fontcolor="${GRAPH.clusterText}",tooltip="${gvEsc(stat.label)} — click to expand"];\n`;
-    }
-  });
+    });
+    const seenEdge = new Set<string>();
+    model.edges.forEach(([si, ti, ty]) => {
+      // edges are [source, target] where source *uses* target; DOT draws
+      // target -> source (dependency points at dependent). Keep only edges
+      // whose both ends are visible nodes inside the expanded chapter(s).
+      const sN = model.nodes[si];
+      const tN = model.nodes[ti];
+      if (!visible.has(sN.id) || !visible.has(tN.id) || sN.id === tN.id) return;
+      const key = `${tN.id} ${sN.id} ${ty}`;
+      if (seenEdge.has(key)) return;
+      seenEdge.add(key);
+      s += `  "${tN.id}" -> "${sN.id}"${ty === 'uses' ? ' [style=dashed]' : ''};\n`;
+    });
+    return s + '}\n';
+  }
 
+  // ---- overview: chapter super-nodes + chapter→chapter edges only ----------
+  model.chapters.forEach((stat, ch) => {
+    if (!stat.count) return;
+    const pct = Math.round((100 * stat.done) / stat.count);
+    s += `  "ch${ch}" [label="${gvEsc(stat.label)}\\n${stat.count} statements · ${pct}%",fillcolor="${GRAPH.clusterFill}",color="${GRAPH.clusterBorder}",penwidth=2.6,fontcolor="${GRAPH.clusterText}",tooltip="${gvEsc(stat.label)} — click to expand"];\n`;
+  });
   const seenEdge = new Set<string>();
   model.edges.forEach(([si, ti, ty]) => {
     const sN = model.nodes[si];
     const tN = model.nodes[ti];
-    const sId = dispId(sN, expanded, lvlMax);
-    const tId = dispId(tN, expanded, lvlMax);
-    if (sId == null || tId == null || sId === tId) return;
-    const key = `${sId} ${tId} ${ty}`;
+    if (sN.ch === tN.ch) return;
+    // dependency chapter (target) -> dependent chapter (source)
+    const from = chapterNodeId(tN.ch);
+    const to = chapterNodeId(sN.ch);
+    const key = `${from} ${to} ${ty}`;
     if (seenEdge.has(key)) return;
     seenEdge.add(key);
-    s += `  "${tId}" -> "${sId}"${ty === 'uses' ? ' [style=dashed]' : ''};\n`;
+    s += `  "${from}" -> "${to}"${ty === 'uses' ? ' [style=dashed]' : ''};\n`;
   });
 
   return s + '}\n';
