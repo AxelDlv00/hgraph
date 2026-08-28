@@ -211,10 +211,43 @@ export function chapterNodeId(ch: number): string {
 }
 export const CHAPTER_ID_RE = /^ch(\d+)$/;
 
-/** Graphviz attrs tuned for short dependency edges inside one chapter. */
+/**
+ * Graphviz attrs for a clean layered DAG (FLT-style): straight edges between
+ * adjacent ranks, generous spacing, no spline routing through the pack.
+ */
 const DOT_GRAPH_ATTRS =
-  'rankdir=TB;bgcolor="transparent";newrank=true;splines=true;overlap=false;' +
-  'nodesep=0.5;ranksep=0.7;ordering=out;';
+  'rankdir=TB;bgcolor="transparent";newrank=true;splines=line;overlap=false;' +
+  'nodesep=0.55;ranksep=0.85;ordering=out;';
+
+/**
+ * Drop edges implied by a longer path (transitive reduction) on a digraph
+ * given as directed pairs `from -> to`. Keeps the covering / Hasse edges so
+ * Graphviz draws short, local arrows instead of a hairball of long chords.
+ */
+function transitiveReduction(edges: Array<[string, string, string]>): Array<[string, string, string]> {
+  const succ = new Map<string, Set<string>>();
+  for (const [from, to] of edges) {
+    if (!succ.has(from)) succ.set(from, new Set());
+    succ.get(from)!.add(to);
+  }
+  const reachesWithoutDirect = (src: string, dst: string): boolean => {
+    const seen = new Set<string>([src]);
+    const stack = [src];
+    while (stack.length) {
+      const x = stack.pop()!;
+      for (const y of succ.get(x) || []) {
+        if (x === src && y === dst) continue; // skip the direct edge under test
+        if (y === dst) return true;
+        if (!seen.has(y)) {
+          seen.add(y);
+          stack.push(y);
+        }
+      }
+    }
+    return false;
+  };
+  return edges.filter(([from, to]) => !reachesWithoutDirect(from, to));
+}
 
 /**
  * Build the chapter-collapsed Graphviz DOT.
@@ -222,9 +255,9 @@ const DOT_GRAPH_ATTRS =
  * - Overview (`expanded` empty): one purple super-node per chapter, edges only
  *   between chapters (aggregated cross-chapter dependencies). Matches the
  *   precomputed SVG from `hgraph.layout._dot_chapter_overview`.
- * - Expanded chapter(s): **only those chapters' nodes and intra-chapter edges**.
- *   Collapsed chapters are *not* drawn as peer nodes — cross-chapter edges to
- *   them used to pull long curved routes across the canvas and wreck layout.
+ * - Expanded chapter(s): **only those chapters' nodes**, with a **transitive
+ *   reduction** of intra-chapter edges and straight-line splines — the layout
+ *   that keeps arrows short and local (as in a clean FLT-style DAG).
  *
  * Regenerate (and re-render via Graphviz) on every expand/collapse/level
  * change; never hide/show a stale layout.
@@ -239,10 +272,10 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
   let s = 'strict digraph "" {\n';
   s += `  ${DOT_GRAPH_ATTRS}\n`;
   s += '  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=11,margin="0.11,0.05",penwidth=1.8];\n';
-  s += `  edge [color="${GRAPH.edge}",arrowhead=vee,arrowsize=0.8,penwidth=1];\n`;
+  s += `  edge [color="${GRAPH.edge}",arrowhead=vee,arrowsize=0.75,penwidth=1];\n`;
   s += '  graph [fontname="Helvetica",fontsize=13,labeljust="l"];\n';
 
-  // ---- expanded: only the open chapter(s), intra-chapter edges only --------
+  // ---- expanded: only the open chapter(s), reduced intra-chapter edges -----
   if (expanded.size > 0) {
     const visible = new Set<string>();
     model.chapters.forEach((stat, ch) => {
@@ -258,19 +291,21 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
         });
       s += '  }\n';
     });
+    // model edge [source, target]: source *uses* target → draw target -> source
+    const drawn: Array<[string, string, string]> = [];
     const seenEdge = new Set<string>();
     model.edges.forEach(([si, ti, ty]) => {
-      // edges are [source, target] where source *uses* target; DOT draws
-      // target -> source (dependency points at dependent). Keep only edges
-      // whose both ends are visible nodes inside the expanded chapter(s).
       const sN = model.nodes[si];
       const tN = model.nodes[ti];
       if (!visible.has(sN.id) || !visible.has(tN.id) || sN.id === tN.id) return;
-      const key = `${tN.id} ${sN.id} ${ty}`;
+      const key = `${tN.id}\0${sN.id}\0${ty}`;
       if (seenEdge.has(key)) return;
       seenEdge.add(key);
-      s += `  "${tN.id}" -> "${sN.id}"${ty === 'uses' ? ' [style=dashed]' : ''};\n`;
+      drawn.push([tN.id, sN.id, ty]);
     });
+    for (const [from, to, ty] of transitiveReduction(drawn)) {
+      s += `  "${from}" -> "${to}"${ty === 'uses' ? ' [style=dashed]' : ''};\n`;
+    }
     return s + '}\n';
   }
 
@@ -281,6 +316,7 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
     s += `  "ch${ch}" [label="${gvEsc(stat.label)}\\n${stat.count} statements · ${pct}%",fillcolor="${GRAPH.clusterFill}",color="${GRAPH.clusterBorder}",penwidth=2.6,fontcolor="${GRAPH.clusterText}",tooltip="${gvEsc(stat.label)} — click to expand"];\n`;
   });
   const seenEdge = new Set<string>();
+  const chapterDrawn: Array<[string, string, string]> = [];
   model.edges.forEach(([si, ti, ty]) => {
     const sN = model.nodes[si];
     const tN = model.nodes[ti];
@@ -288,11 +324,14 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
     // dependency chapter (target) -> dependent chapter (source)
     const from = chapterNodeId(tN.ch);
     const to = chapterNodeId(sN.ch);
-    const key = `${from} ${to} ${ty}`;
+    const key = `${from}\0${to}\0${ty}`;
     if (seenEdge.has(key)) return;
     seenEdge.add(key);
-    s += `  "${from}" -> "${to}"${ty === 'uses' ? ' [style=dashed]' : ''};\n`;
+    chapterDrawn.push([from, to, ty]);
   });
+  for (const [from, to, ty] of transitiveReduction(chapterDrawn)) {
+    s += `  "${from}" -> "${to}"${ty === 'uses' ? ' [style=dashed]' : ''};\n`;
+  }
 
   return s + '}\n';
 }

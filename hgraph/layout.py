@@ -243,8 +243,8 @@ def _dot_clustered(m: _Model, unit_of, n_units: int, label_fn) -> str:
     for i in range(m.n):
         by_u.setdefault(unit_of[i], []).append(i)
     out = ['strict digraph "" {',
-           '  rankdir=TB;bgcolor="transparent";newrank=true;splines=true;overlap=false;'
-           'nodesep=0.5;ranksep=0.7;ordering=out;',
+           '  rankdir=TB;bgcolor="transparent";newrank=true;splines=line;overlap=false;'
+           'nodesep=0.55;ranksep=0.85;ordering=out;',
            '  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=11,margin="0.11,0.05",penwidth=1.8];',
            '  edge [color="' + _EDGE + '",arrowhead=vee,arrowsize=0.7,penwidth=1];',
            '  graph [fontname="Helvetica",fontsize=13,labeljust="l"];']
@@ -279,9 +279,31 @@ def _dot_overview(m: _Model, unit_of, n_units: int, label_fn, id_prefix: str) ->
         if a == b:
             continue
         em[(b, a)] = em.get((b, a), 0) + 1
+    # Covering edges only (transitive reduction) — same idea as graphDot.ts.
+    succ: dict[int, set[int]] = {}
+    for b, a in em:
+        succ.setdefault(b, set()).add(a)
+
+    def _reaches_without_direct(src: int, dst: int) -> bool:
+        seen = {src}
+        stack = [src]
+        while stack:
+            x = stack.pop()
+            for y in succ.get(x, ()):
+                if x == src and y == dst:
+                    continue
+                if y == dst:
+                    return True
+                if y not in seen:
+                    seen.add(y)
+                    stack.append(y)
+        return False
+
+    reduced = {(b, a): w for (b, a), w in em.items()
+               if not _reaches_without_direct(b, a)}
     out = ['strict digraph "" {',
-           '  rankdir=TB;bgcolor="transparent";newrank=true;splines=true;overlap=false;'
-           'nodesep=0.5;ranksep=0.7;ordering=out;',
+           '  rankdir=TB;bgcolor="transparent";newrank=true;splines=line;overlap=false;'
+           'nodesep=0.55;ranksep=0.85;ordering=out;',
            '  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=12,margin="0.2,0.13",penwidth=1.8];',
            '  edge [color="' + _EDGE + '",arrowhead=vee,arrowsize=0.85,penwidth=1.2];',
            '  graph [fontname="Helvetica"];']
@@ -304,7 +326,7 @@ def _dot_overview(m: _Model, unit_of, n_units: int, label_fn, id_prefix: str) ->
                    'color="%s",penwidth=2.6,fontcolor="%s",tooltip="%s — click to expand"];'
                    % (id_prefix, u, lbl, count[u], pct, fill, border,
                       _CLUSTER["text"] if is_ch else _NODE_TEXT, lbl))
-    for (b, a), w in em.items():
+    for (b, a), w in reduced.items():
         extra = (' [penwidth=%.1f]' % min(4.0, 1 + math.sqrt(w))) if w > 1 else ''
         out.append('  "%s%d" -> "%s%d"%s;' % (id_prefix, b, id_prefix, a, extra))
     out.append('}')
