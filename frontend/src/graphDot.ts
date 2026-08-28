@@ -284,14 +284,12 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
   s += '  graph [fontname="Helvetica",fontsize=13,labeljust="l"];\n';
 
   // ---- expanded: free layout of the open chapter(s) only --------------------
+  // Title + purple frame are drawn in the UI (GraphModal), not as a Graphviz
+  // cluster — clusters force straight edges that cut through nodes.
   if (expanded.size > 0) {
     const visible = new Set<string>();
-    const titles: string[] = [];
     model.chapters.forEach((stat, ch) => {
       if (!stat.count || !expanded.has(ch)) return;
-      titles.push(stat.label);
-      // Free nodes (no cluster_*): Graphviz can place ranks and route splines
-      // around nodes. Chapter title is a graph label; close via "All chapters".
       (byCh.get(ch) || [])
         .filter((n) => n.lvl <= lvlMax)
         .forEach((n) => {
@@ -301,9 +299,6 @@ export function dotMixed(model: GraphModel, expanded: ReadonlySet<number>, lvlMa
           s += `  "${n.id}" [shape=${def ? 'box' : 'ellipse'},style=${def ? '"rounded,filled"' : '"filled"'},fillcolor="${st.f}",color="${st.b}",fontcolor="${GRAPH.nodeText}",label="${dotLabel(n.e.title || n.e.label || n.e.id)}"];\n`;
         });
     });
-    if (titles.length) {
-      s += `  graph [label="${gvEsc(titles.join(' · ') + '  (All chapters to close)')}",labelloc=t,fontsize=12.5,fontcolor="${GRAPH.expandedText}"];\n`;
-    }
     // model edge [source, target]: source *uses* target → draw target -> source
     const drawn: Array<[string, string, string]> = [];
     const seenEdge = new Set<string>();

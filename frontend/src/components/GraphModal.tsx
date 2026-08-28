@@ -251,6 +251,20 @@ export function GraphModal({
     prefetchLayouts(dots);
   }, [model, lvlMax, data.gvsvg]);
 
+  // Title for the purple chapter frame around an expanded layout (UI chrome,
+  // not a Graphviz cluster — so edge routing stays free).
+  const expandedTitle = useMemo(() => {
+    if (!expanded.size) return '';
+    return [...expanded]
+      .map((ch) => model.chapters[ch]?.label)
+      .filter(Boolean)
+      .join(' · ');
+  }, [expanded, model]);
+  const expandedChKey = useMemo(() => {
+    if (!expanded.size) return '';
+    return [...expanded].sort((a, b) => a - b).join(',');
+  }, [expanded]);
+
   // --- inject + tag the rendered SVG imperatively ---------------------------
   // The SVG is deliberately NOT rendered through dangerouslySetInnerHTML:
   // React 19 re-sets such content on ANY re-render of the element — even
@@ -265,10 +279,34 @@ export function GraphModal({
   // browser doesn't add its own tooltips.
   useLayoutEffect(() => {
     const host = innerRef.current as (HTMLDivElement & { __hgSvg?: string }) | null;
-    if (!host || svg == null || host.__hgSvg === svg) return;
-    host.innerHTML = svg;
-    host.__hgSvg = svg;
-    const svgEl = host.querySelector('svg');
+    // Cache key includes frame chrome so open/close chapter re-wraps the SVG.
+    const cacheKey = svg == null ? '' : `${svg}\0${expandedChKey}\0${expandedTitle}`;
+    if (!host || svg == null || host.__hgSvg === cacheKey) return;
+    host.innerHTML = '';
+    host.__hgSvg = cacheKey;
+
+    let svgRoot: ParentNode = host;
+    if (expandedTitle) {
+      const frame = document.createElement('div');
+      frame.className = 'gm-ch-frame';
+      // first open chapter id — clicking the frame chrome collapses it
+      const firstCh = [...expanded][0];
+      if (firstCh != null) frame.dataset.ch = String(firstCh);
+      const title = document.createElement('div');
+      title.className = 'gm-ch-title';
+      title.textContent = expandedTitle;
+      frame.appendChild(title);
+      const body = document.createElement('div');
+      body.className = 'gm-ch-body';
+      body.innerHTML = svg;
+      frame.appendChild(body);
+      host.appendChild(frame);
+      svgRoot = body;
+    } else {
+      host.innerHTML = svg;
+    }
+
+    const svgEl = svgRoot.querySelector('svg');
     if (!svgEl) return;
     svgEl.querySelectorAll('g.node').forEach((g) => {
       const el = g as SVGGElement;
@@ -293,7 +331,7 @@ export function GraphModal({
       }
     });
     fitToView(); // after injection, so it measures the new layout
-  }, [svg]);
+  }, [svg, expanded, expandedChKey, expandedTitle]);
 
   // one delegated listener instead of one per node — re-renders never re-wire
   function onCanvasClick(e: React.MouseEvent) {
@@ -317,9 +355,15 @@ export function GraphModal({
       }
       return;
     }
+    // Purple chapter frame chrome (title/padding) or legacy Graphviz cluster:
+    // click to close. Clicks inside `.gm-ch-body` (the graph itself) must not
+    // collapse the chapter — only the frame chrome does.
+    const frameEl = target.closest('.gm-ch-frame') as HTMLElement | null;
+    const onFrameChrome = !!frameEl && !target.closest('.gm-ch-body');
     const clusterEl = target.closest('g.cluster') as SVGGElement | null;
-    if (clusterEl?.dataset.ch != null) {
-      const ch = Number(clusterEl.dataset.ch);
+    const chRaw = onFrameChrome ? frameEl!.dataset.ch : clusterEl?.dataset.ch;
+    if (chRaw != null) {
+      const ch = Number(chRaw);
       onSelect(null);
       setExpanded((s) => {
         const next = new Set(s);
@@ -424,7 +468,7 @@ export function GraphModal({
   const hint =
     (expanded.size === 0
       ? 'click a chapter to open it'
-      : 'click a node to open it · use Open a chapter… to switch · All chapters to close') +
+      : 'click a node to open it · click the purple frame or All chapters to close') +
     ' · drag or scroll to pan · pinch or ctrl+scroll to zoom';
 
   return (
@@ -475,7 +519,7 @@ export function GraphModal({
         ))}
         <span className="sp" />
         <button
-          className="gm-btn"
+          className={`gm-btn${expanded.size ? ' gm-btn-chapter' : ''}`}
           onClick={() => {
             onSelect(null);
             setExpanded(new Set());

@@ -609,6 +609,21 @@ a {
   opacity: 0.6;
   cursor: default;
 }
+/* Matches chapter purple (GRAPH.cluster*) so "All chapters" is obvious once a
+   chapter is open — same fill/border/ink as the collapsed chapter boxes. */
+.gm-btn.gm-btn-chapter {
+  background: #ede9fe;
+  border-color: #7c3aed;
+  color: #3b0a91;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.18);
+}
+.gm-btn.gm-btn-chapter:hover:not(:disabled) {
+  background: #ddd6fe;
+  border-color: #6d28d9;
+}
+.gm-btn.gm-btn-chapter:disabled {
+  opacity: 1; /* purple only when enabled; disabled keeps the grey .gm-btn look via class drop */
+}
 
 /* ==== dependency-graph modal — a full-screen overlay, same shell as the
    original's #graphmodal (title bar + graph + a collapsible detail side
@@ -1158,6 +1173,35 @@ pre.lean { background: #f8f9fb; border: 1px solid var(--line); border-radius: 8p
 .gv-inner .node, .gv-inner .edge { transition: opacity 120ms ease; }
 .gv-inner .node:hover path, .gv-inner .node:hover ellipse { stroke-width: 3; }
 .gv-inner .cluster { cursor: pointer; }
+/* Purple chapter frame around an expanded free layout — same colours as the
+   old Graphviz cluster, but drawn in CSS so edge routing stays unconstrained. */
+.gm-ch-frame {
+  display: inline-block;
+  box-sizing: border-box;
+  background: #f3effc;
+  border: 2.4px solid #7c3aed;
+  border-radius: 14px;
+  padding: 0 12px 14px;
+  /* frame padding/border is clickable chrome (close chapter); body is not */
+  cursor: pointer;
+}
+.gm-ch-title {
+  font: 600 13px Helvetica, "Helvetica Neue", Arial, sans-serif;
+  color: #5b21b6;
+  padding: 12px 8px 10px;
+  letter-spacing: 0.01em;
+  user-select: none;
+  cursor: pointer;
+}
+.gm-ch-body {
+  display: block;
+  cursor: default; /* nodes/edges handle their own cursor; body is not "close" */
+  /* absorb clicks so they don't hit the frame and collapse the chapter */
+  pointer-events: auto;
+}
+.gm-ch-body svg {
+  display: block;
+}
 .gv-inner g.node.gm-node-dependency polygon,
 .gv-inner g.node.gm-node-dependency ellipse,
 .gv-inner g.node.gm-node-dependency path { stroke: #2563eb !important; stroke-width: 3px !important; }
