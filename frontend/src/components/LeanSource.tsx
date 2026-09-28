@@ -1,10 +1,11 @@
 import type { LeanDecl } from '../types';
 import { leanHi } from '../latex';
+import { Docstring } from './Docstring';
 
 export function LeanSource({ decl }: { decl: LeanDecl }) {
   const statement = decl.statement || decl.code;
   return <>
-    {decl.docstring && <p className="lean-docstring">{decl.docstring}</p>}
+    {decl.docstring && <Docstring text={decl.docstring} />}
     {statement && <pre className="lean-code" dangerouslySetInnerHTML={{ __html: leanHi(statement) }} />}
     {(decl.context || (decl.statement && decl.code !== decl.statement)) && <details>
       <summary>Source and context</summary>
