@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import type { Entry, Dep, RefEntry } from '../types';
-import { leanHi, type CiteNums } from '../latex';
+import { type CiteNums } from '../latex';
+import { LeanSource } from './LeanSource';
 import { Math as Tex } from './Tex';
 import { StatusBadge } from './StatusBadge';
 import { localDepGraph } from '../depgraph';
@@ -109,8 +110,7 @@ export function StatementCard({
                 <code>{l.name}</code>
                 <StatusBadge status={l.status} />
               </div>
-              {/* leanHi escapes the code before adding highlight spans */}
-              {l.code && <pre className="lean-code" dangerouslySetInnerHTML={{ __html: leanHi(l.code) }} />}
+              <LeanSource decl={l} />
             </div>
           ))}
         </div>

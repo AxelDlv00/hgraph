@@ -1263,3 +1263,4 @@ pre.lean { background: #f8f9fb; border: 1px solid var(--line); border-radius: 8p
 @media (max-width: 620px) {
   .stmt-deps-body { grid-template-columns: 1fr; }
 }
+.lean-docstring { white-space: pre-wrap; overflow-wrap: anywhere; }
