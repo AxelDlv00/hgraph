@@ -54,7 +54,12 @@ try {
       await page.locator('.choverview').waitFor();
       assert.equal((await page.locator('.choverview').innerText()).includes('50%'), progress);
       assert.equal(await page.locator('.project-header .pbar').count(), progress ? 1 : 0);
-      const summaryLink = page.locator('.navlink').filter({ hasText: progress ? 'Blueprint summary' : 'Source links' });
+      if (!progress) {
+        assert.equal(await page.locator('.navlink').filter({ hasText: 'Source links' }).count(), 0);
+        assert.equal(await page.locator('option[value="summary"]').count(), 0);
+        continue;
+      }
+      const summaryLink = page.locator('.navlink').filter({ hasText: 'Blueprint summary' });
       if (width <= 900) await page.getByLabel('Blueprint view', { exact: true }).selectOption('summary');
       else await summaryLink.click();
       await page.locator('h2.ch').waitFor();

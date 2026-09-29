@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test:docstrings": "node --test tests/docstring.test.mjs",
     "test:progress": "node tests/progress.mjs",
+    "test:rendering": "node tests/rendering.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

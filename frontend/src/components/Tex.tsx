@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import { proseHtml, type CiteNums, type RefEntry } from '../latex';
 import { typesetMath } from '../typeset';
 
@@ -37,30 +37,26 @@ export function Math({
 }) {
   const ref = useRef<HTMLElement | null>(null);
 
-  // Memoised so re-renders hand React the *same string*: React only rewrites
-  // `dangerouslySetInnerHTML` when the `__html` value changes, so KaTeX's
-  // in-place typesetting survives unrelated re-renders (a sibling selection
-  // change, a filter keystroke) untouched — and the `detex` regex pipeline
-  // runs once per content, not once per render.
+  // Convert only when the content or its reference numbering changes.
   const html = useMemo(() => {
     const full = proseHtml(text, refs, cites);
     return As === 'p' ? full : full.replace(/^<p>/, '').replace(/<\/p>$/, '');
   }, [text, refs, cites, As]);
+  const macroKey = JSON.stringify(macros || {});
 
-  // No dependency array: React 19 re-sets `dangerouslySetInnerHTML` children
-  // on any re-render of this element — even with `__html` unchanged — which
-  // reverts KaTeX output to raw `$…$`. typesetMath detects that reset in
-  // O(1) (see typeset.ts) and only re-typesets when it really happened.
-  useEffect(() => {
-    if (ref.current) typesetMath(ref.current, macros);
-  });
+  // KaTeX owns the children. React must not restore raw TeX on unrelated
+  // chapter hydration/selection renders, which causes visible layout flicker.
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    ref.current.innerHTML = html;
+    typesetMath(ref.current, JSON.parse(macroKey));
+  }, [html, As, macroKey]);
 
   return (
     <As
       ref={ref as never}
       id={id}
       className={className}
-      dangerouslySetInnerHTML={{ __html: html }}
       onClick={(e: React.MouseEvent) => {
         const t = e.target as HTMLElement;
         const refEl = t.closest('.ref[data-id]') as HTMLElement | null;

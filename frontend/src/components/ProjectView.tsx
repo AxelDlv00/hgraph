@@ -639,7 +639,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
         <select aria-label="Blueprint view" value={view} onChange={(e) => onSetView(e.target.value)}>
           <option value="overview">Overview</option>
           <option value="doc">Chapter</option>
-          <option value="summary">{data.progress === false ? 'Source links' : 'Blueprint summary'}</option>
+          {data.progress !== false && <option value="summary">Blueprint summary</option>}
           <option value="biblio">Blueprint bibliography</option>
           <option value="graph">Dependency graph</option>
           {customTabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
