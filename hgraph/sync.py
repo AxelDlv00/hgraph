@@ -252,6 +252,12 @@ def _statement_fields(env: str, title, inner: str) -> dict:
     labels = _macro_args("label", _MATH_SPAN_RE.sub("", inner))
     body = _strip_macros(inner)
     title, body = _lift_title(title, body)
+    source_refs = []
+    for macro in ("dcref", "source"):
+        source_refs = [_brace_span(inner, m.end() - 1)[0].strip()
+                       for m in re.finditer(r"\\" + macro + r"\{", inner)]
+        if source_refs:
+            break
     return {
         "label": labels[0] if labels else None,
         # a statement may carry more than one \label (e.g. a new semantic label
@@ -275,7 +281,7 @@ def _statement_fields(env: str, title, inner: str) -> dict:
         # stripped from the body by the annotation regex above, so a spelling
         # that isn't captured here is discarded silently — the statement still
         # renders and only its citation quietly disappears.
-        "ref": _first_arg("dcref", inner) or _first_arg("source", inner),
+        "ref": "; ".join(source_refs) or None,
         "body": body,
     }
 

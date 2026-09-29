@@ -193,7 +193,7 @@ function detexRest(s: string): string {
     .replace(/\\end\{description\}/g, '</ul>')
     .replace(/\\item\s*/g, '</li><li>');
   s = s.replace(/<(ul|ol)><\/li>/g, '<$1>');
-  s = s.replace(/\\(?:label|hspace\*?|vspace\*?|phantom|hphantom|vphantom|vskip|hskip|setlength|index|footnotemark)\{[^{}]*\}/g, '');
+  s = s.replace(/\\(?:label|chaptermark|bibliographyrefs|hspace\*?|vspace\*?|phantom|hphantom|vphantom|vskip|hskip|setlength|index|footnotemark)\{[^{}]*\}/g, '');
   s = s
     .replace(/\\(?:dcref|group|level|lean|uses|proves|label|source)\{[^{}]*\}/g, '')
     .replace(/\\(?:leanok|notready|mathlibok|sketch)\b/g, '');

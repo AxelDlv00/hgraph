@@ -110,7 +110,7 @@ export function StatementCard({
                 <code>{l.name}</code>
                 <StatusBadge status={l.status} />
               </div>
-              <LeanSource decl={l} />
+              <LeanSource decl={l} repo={repo} root={root} />
             </div>
           ))}
         </div>

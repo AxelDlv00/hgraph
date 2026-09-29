@@ -85,14 +85,14 @@ export function Toc({
         ))}
       </div>
       <div className="navlinks">
-        {NAV_LINKS.map((n) => (
+        {NAV_LINKS.filter(n => progress || n.view !== 'summary').map((n) => (
           <a
             key={n.view}
             className={`navlink${(n.view === 'graph' ? graphOpen : view === n.view) ? ' on' : ''}`}
             onClick={() => onSetView(n.view)}
           >
             <span className="ni">{n.icon}</span>
-            {!progress && n.view === 'summary' ? 'Source links' : n.label}
+            {n.label}
           </a>
         ))}
         {customTabs.map((c) => (

@@ -66,9 +66,13 @@ function DependencyDetails({
 function LeanDetails({
   lean,
   mathlibName,
+  repo,
+  root,
 }: {
   lean: NonNullable<StmtBlock['enrich']>['lean'];
   mathlibName: string[] | null;
+  repo: string | null;
+  root: string;
 }) {
   if (!lean.length && !mathlibName) return null;
   if (!lean.length) {
@@ -89,7 +93,7 @@ function LeanDetails({
               <code>{l.name}</code>
               <span className={`b b-${l.status || 'empty'}`}>{(l.status || 'empty').replace('_', ' ')}</span>
             </div>
-            <LeanSource decl={l} />
+            <LeanSource decl={l} repo={repo} root={root} />
           </div>
         ))}
       </div>
@@ -142,11 +146,11 @@ export function StmtBox({
         </span>
         {b.title && b.title !== b.label && <Tex as="span" className="st" text={b.title} refs={refs} />}
         <span className="badges">
-          {en?.ref && (
-            <span className="reftag" title="source reference">
-              {en.ref}
+          {en?.ref?.split(';').map((reference, index) => (
+            <span key={index} className="reftag" title="source reference">
+              {reference.trim()}
             </span>
-          )}
+          ))}
           {en?.sketch && (
             <span className="sketchtag" title="\sketch — the proof is deliberately a sketch">
               sketch
@@ -168,7 +172,7 @@ export function StmtBox({
             Open in graph
           </button>
           <DependencyDetails uses={uses} usedBy={usedBy} refs={refs} macros={macros} onNavigate={onNavigate} />
-          {en && <LeanDetails lean={en.lean} mathlibName={en.mathlib_name} />}
+          {en && <LeanDetails lean={en.lean} mathlibName={en.mathlib_name} repo={repo} root={root} />}
           {en && (
             <Suspense fallback={<span className="mtag rv">{en.reviews.length} reviews · {en.comments.length} comments</span>}>
               <Reviews
