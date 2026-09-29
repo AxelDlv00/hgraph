@@ -294,6 +294,18 @@ is only a structural placeholder. `hgraph sync` reports it as planned and
 `hgraph serve` does not warn about the absence of a project-local `hgraph/`
 directory. Remove the flag when adding blueprint or Lean sources.
 
+**Expositions and source links.** For an exposition whose source annotations
+are navigation aids rather than a formalization task list, set
+`site.progress: false` in `hgraph/config.yaml`. This omits completion
+percentages from project cards, headers and chapters, and suppresses the
+workspace aggregate when any project opts out. The blueprint summary becomes
+a **Source links** maintenance view with counts and per-statement annotations;
+graph labels describe source links rather than unfinished proofs. The
+exported percentage is `null`, not zero or 100. Existing projects retain
+progress tracking by default. This setting does not alter Lean declarations,
+dependency edges, or verification results; publish revision-pinned build and
+kernel-check evidence separately, for example in a `site.tabs` content page.
+
 **Custom blueprint tabs.** A project can add its own tabs to the blueprint view
 (beside Overview / Summary / Graph) from its `hgraph/config.yaml`:
 

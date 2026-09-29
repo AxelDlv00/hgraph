@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useProgress, sourceLinkLabel } from '../progress';
 import type { Dep, Entry, ProjectData } from '../types';
 import { buildGraphModel, dotMixed, CHAPTER_ID_RE, type GraphModel } from '../graphDot';
 import { layoutDot, cachedLayout, prefetchLayouts } from '../vizInstance';
@@ -67,6 +68,7 @@ export function GraphModal({
   // so the side panel renders \ref/\cite exactly as the document does
   const cites = useMemo(() => citeNums(data.bib), [data]);
 
+  const progress = useProgress();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [lvlMax, setLvlMax] = useState(2);
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
@@ -515,7 +517,7 @@ export function GraphModal({
         />
         {STATUS_CHIPS.map((c) => (
           <span key={c.f} className={`gm-chip${statusFilter.has(c.f) ? ' on' : ''}`} onClick={() => toggleStatus(c.f)}>
-            {c.label}
+            {progress ? c.label : sourceLinkLabel(c.f)}
           </span>
         ))}
         <span className="sp" />

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ProgressContext } from '../progress';
 import type { Chapter, ProjectData, ProjectGraphData, Dep, StmtBlock } from '../types';
 import { ChapterView } from './ChapterView';
 import { Toc, type ViewName } from './Toc';
@@ -536,7 +537,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     if (v === 'biblio') void loadAllChapters().catch(() => undefined);
   }
 
-  // live header stats — total/mathlib/lean/sorry counts + formalized % —
+  // live header stats — total/mathlib/lean/sorry counts + optional formalized % —
   // ported from the original's `stats()`.
   const stats = useMemo(() => {
     const es = entries;
@@ -546,9 +547,9 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
       else if (e.lean_status === 'lean_ok') c.lean_ok++;
       else if (e.lean_status === 'sorry') c.sorry++;
     }
-    const pct = Math.round((100 * (c.lean_ok + c.mathlib_ok)) / Math.max(1, c.total));
+    const pct = data?.progress === false ? null : Math.round((100 * (c.lean_ok + c.mathlib_ok)) / Math.max(1, c.total));
     return { ...c, pct };
-  }, [entries]);
+  }, [entries, data?.progress]);
 
   if (error) return <div className="page-error">Couldn't load this project: {error}</div>;
   if (!data) return <div className="page-loading">Loading…</div>;
@@ -570,6 +571,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
     : undefined;
 
   return (
+    <ProgressContext.Provider value={data.progress !== false}>
     <div className="project-page" style={accentStyle}>
       {/* while the graph modal is open, clicks in its pinned mini-graph popup
           must select within the modal, not silently change the doc view behind it */}
@@ -613,7 +615,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
             <span className="pstat">
               <b>{stats.total}</b> statements
             </span>
-            <span className="pstat" style={{ color: 'var(--mathlib)' }}>
+            {data.progress !== false && <><span className="pstat" style={{ color: 'var(--mathlib)' }}>
               <b>{stats.mathlib_ok}</b> mathlib
             </span>
             <span className="pstat" style={{ color: 'var(--lean)' }}>
@@ -628,9 +630,21 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
                 <i style={{ width: `${stats.pct}%` }} />
               </span>
             </span>
+            </>}
           </div>
         </div>
       </header>
+
+      <nav className="mobile-project-nav" aria-label="Blueprint views">
+        <select aria-label="Blueprint view" value={view} onChange={(e) => onSetView(e.target.value)}>
+          <option value="overview">Overview</option>
+          <option value="doc">Chapter</option>
+          <option value="summary">{data.progress === false ? 'Source links' : 'Blueprint summary'}</option>
+          <option value="biblio">Blueprint bibliography</option>
+          <option value="graph">Dependency graph</option>
+          {customTabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+        </select>
+      </nav>
 
       <div
         className={`doc-wrap${leftPanelOpen ? '' : ' nav-collapsed'}${rightPanelOpen ? '' : ' outline-collapsed'}`}
@@ -757,6 +771,7 @@ export function ProjectView({ root, initialLocator }: { root: string; initialLoc
         <Outline chapter={chapters[curCh] || null} selectedId={selectedId} onSelect={navigate} />
       </div>
     </div>
+    </ProgressContext.Provider>
   );
 }
 

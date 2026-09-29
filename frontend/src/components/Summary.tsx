@@ -3,6 +3,7 @@ import type { Entry, Chapter, RefEntry, LeanDecl } from '../types';
 import { Math as Tex } from './Tex';
 import { ABBR } from './StmtBox';
 import { statusColor } from '../palette';
+import { useProgress, sourceLinkLabel } from '../progress';
 
 /** A compact "statement card" for the summary lists — the original's
  * `sumBox`/`readyItem`: tag+number, title, status badge, and a row of
@@ -121,7 +122,24 @@ function computeSummary(entries: Entry[]): SummaryData {
 /** The "Blueprint summary" tab — ready-now/blockers action lists plus a
  * per-chapter coverage table, ported from the original's
  * `computeSummary`/`renderSummary`. */
-export function Summary({
+export function Summary(props: Parameters<typeof FormalizationSummary>[0]) {
+  const progress = useProgress();
+  if (progress) return <FormalizationSummary {...props} />;
+  const linked = props.entries.filter((e) => e.lean_status === 'lean_ok' || e.lean_status === 'mathlib_ok').length;
+  return <div className="doc">
+    <h2 className="ch">Source links</h2>
+    <p>{linked} of {props.entries.length} statements have resolved source annotations.</p>
+    <table className="sumtable">
+      <thead><tr><th>Statement</th><th>Source annotation</th></tr></thead>
+      <tbody>{props.entries.map((e) => <tr key={e.id}>
+        <td><a onClick={() => props.onSelect(e.id)}><Tex as="span" text={e.title || e.label || e.id} refs={props.refs} /></a></td>
+        <td>{sourceLinkLabel(e.lean_status)}</td>
+      </tr>)}</tbody>
+    </table>
+  </div>;
+}
+
+function FormalizationSummary({
   entries,
   chapters,
   refs,

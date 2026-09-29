@@ -272,6 +272,15 @@ def _fm_scalar(s: str) -> str:
     return s.strip().strip("'\"")
 
 
+def show_progress(root: str | Path) -> bool:
+    """Whether source annotations may be interpreted as formalization progress."""
+    from .sync import load_config
+    value = (load_config(root).get("site") or {}).get("progress", True)
+    if not isinstance(value, bool):
+        raise HGraphError("site.progress must be a boolean")
+    return value
+
+
 def project_progress(root: str | Path) -> dict:
     """Summarise a project's progress over its blueprint (``tex``) statements —
     the same quantity the dashboard bars show — reading each node's status
@@ -300,7 +309,7 @@ def project_progress(root: str | Path) -> dict:
         "done": done,
         "partial": partial,
         "todo": total - done - partial,
-        "pct": round(100 * done / total) if total else 0,
+        "pct": (round(100 * done / total) if total else 0) if show_progress(root) else None,
     }
 
 
@@ -717,12 +726,14 @@ def build_site_data(manifest: dict, *, base: Path, overview_html: str | None = N
     groups: dict[str | None, list[dict]] = {}
     for p in manifest.get("projects", []):
         p = dict(p)
+        progress = show_progress(base / p["root"])
         try:
             prog = project_progress(base / p["root"])
         except Exception as e:
-            prog = {"statements": 0, "done": 0, "partial": 0, "todo": 0, "pct": 0}
+            prog = {"statements": 0, "done": 0, "partial": 0, "todo": 0, "pct": 0 if progress else None}
             p.setdefault("blurb", f"(progress unavailable: {e})")
         card = {
+            "progress": progress,
             "name": p["name"],
             "root": str(p["root"]).strip("/"),   # the frontend hash-routes to #/<root>
             "category": p.get("category"),

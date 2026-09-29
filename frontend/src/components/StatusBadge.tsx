@@ -1,7 +1,9 @@
 import { statusStyle } from '../palette';
+import { useProgress, sourceLinkLabel } from '../progress';
 
 export function StatusBadge({ status }: { status?: string | null }) {
   const s = statusStyle(status);
+  const progress = useProgress();
   return (
     <span
       style={{
@@ -16,7 +18,7 @@ export function StatusBadge({ status }: { status?: string | null }) {
         whiteSpace: 'nowrap',
       }}
     >
-      {s.label}
+      {progress ? s.label : sourceLinkLabel(status)}
     </span>
   );
 }

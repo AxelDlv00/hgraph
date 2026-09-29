@@ -23,7 +23,7 @@ export function ProjectCard({ p, theme }: { p: ProjectCardData; theme: Theme }) 
         ) : (
           <Icon name={p.icon} />
         )}
-        {p.stats.statements > 0 && (
+        {p.progress !== false && p.stats.statements > 0 && (
           <span className="card-pct" style={{ color: theme.accent, background: '#ffffffcc' }}>
             {p.stats.pct}%
           </span>

@@ -546,7 +546,7 @@ def project_data(g: Graph, *, title: str, blueprint=None, macros_from=None,
     same way `hgraph frontier`/`hgraph stats` compute it independently via
     their own `Analysis(g)` call."""
     from .layout import render_svgs
-    from .site import _content_tabs
+    from .site import _content_tabs, show_progress
 
     bp = _resolve_blueprint(blueprint, root)
     data = build_document(g, bp, title=title) if bp else {**collect(g, title=title), "mode": "list"}
@@ -561,6 +561,7 @@ def project_data(g: Graph, *, title: str, blueprint=None, macros_from=None,
         "macros": resolve_macros(bp, macros_from),
         "repo": _resolve_repo(repo, root),
         "theme": theme,
+        "progress": show_progress(root),
         "customTabs": _content_tabs(site_cfg.get("tabs"), base=Path(root), where="project"),
         "gvsvg": render_svgs(data) if include_layout else {},
     })
@@ -647,7 +648,7 @@ def project_source(g: Graph, *, title: str, blueprint=None, macros_from=None,
     source into entries, or invoke Graphviz. Those fields are hydrated by the
     chapter/graph endpoints only when requested.
     """
-    from .site import _content_tabs
+    from .site import _content_tabs, show_progress
 
     bp = _resolve_blueprint(blueprint, root)
     if bp:
@@ -664,6 +665,7 @@ def project_source(g: Graph, *, title: str, blueprint=None, macros_from=None,
         "macros": resolve_macros(bp, macros_from),
         "repo": _resolve_repo(repo, root),
         "theme": theme,
+        "progress": show_progress(root),
         "customTabs": _content_tabs(site_cfg.get("tabs"), base=Path(root), where="project"),
         "gvsvg": {},
     })
