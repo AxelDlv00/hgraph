@@ -56,7 +56,10 @@ def _clip(code: str, n: int = 60) -> str:
 
 def _entry(n, formalizes, deps, nodes, g) -> dict:
     lean = [{"name": nodes[l].meta.get("decl"), "status": nodes[l].meta.get("lean_status"),
-             "file": nodes[l].meta.get("file"), "code": _clip(nodes[l].content)}
+             "file": nodes[l].meta.get("file"), "code": _clip(nodes[l].content),
+             "statement": nodes[l].meta.get("statement"),
+             "docstring": nodes[l].meta.get("docstring"),
+             "context": nodes[l].meta.get("context")}
             for l in formalizes.get(n.id, []) if l in nodes]
     dep = [{"id": t, "title": nodes[t].title, "label": nodes[t].meta.get("label"), "type": ty}
            for t, ty in deps.get(n.id, []) if t in nodes]

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import type { StmtBlock, RefEntry, Dep } from '../types';
-import { leanHi, type CiteNums } from '../latex';
+import { type CiteNums } from '../latex';
+import { LeanSource } from './LeanSource';
 import { Math as Tex } from './Tex';
 import { Network } from 'lucide-react';
 
@@ -87,7 +88,7 @@ function LeanDetails({
               <code>{l.name}</code>
               <span className={`b b-${l.status || 'empty'}`}>{(l.status || 'empty').replace('_', ' ')}</span>
             </div>
-            {l.code && <pre className="lean-code" dangerouslySetInnerHTML={{ __html: leanHi(l.code) }} />}
+            <LeanSource decl={l} />
           </div>
         ))}
       </div>

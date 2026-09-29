@@ -26,12 +26,14 @@ the string the Lean node is keyed on, so ``sync`` needs no cross-reference index
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import yaml
 
 from .graph import Graph, HGraphError, node_id
+from .lean_source import keyword_count, scan_lean, statement_prefix
 
 
 def load_config(root: str | Path) -> dict:
@@ -88,14 +90,16 @@ LEAN_KINDS = {
     "theorem": "theorem", "lemma": "lemma", "def": "definition",
     "abbrev": "definition", "instance": "instance",
     "structure": "structure", "class": "class", "inductive": "inductive",
+    "opaque": "definition", "axiom": "axiom",
 }
 # when several edges land on one ordered pair, the strongest type wins
 # (the hard `uses` edge subsumes the soft `formalizes` one); higher rank wins.
 _EDGE_RANK = {"uses": 2, "formalizes": 1}
 _DECL_RE = re.compile(
-    r"^\s*(?:@\[[^\]]*\]\s*)?"                      # optional attribute
-    r"(?:private\s+|protected\s+|noncomputable\s+)*"
-    r"(theorem|lemma|def|abbrev|instance|structure|class|inductive)\s+"
+    r"^\s*(?:(?:omit|include)\b.+?\bin\s+)?"
+    r"(?:@\[[^\]]*\]\s*)?"                      # optional attribute
+    r"(?:private\s+|protected\s+|noncomputable\s+|public\s+|unsafe\s+)*"
+    r"(theorem|lemma|def|abbrev|instance|structure|class|inductive|opaque|axiom)\s+"
     # Lean identifiers may contain Unicode letters and symbols.  Stop at the
     # punctuation that starts a declaration's binders/type/body instead of
     # restricting the name to ASCII (e.g. `curvatureOperator_ιMulti`).
@@ -549,22 +553,61 @@ def parse_lean(text: str) -> list[dict]:
     """Extract declarations from Lean source. Tracks ``namespace``/``end`` to
     build the fully-qualified name; captures a preceding ``/-- … -/`` doc
     comment as part of the body; flags a ``sorry``."""
+    scanned = scan_lean(text)
     lines = text.splitlines()
+    clean_lines = scanned.without_comments.splitlines()
+    code_lines = scanned.code.splitlines()
+    offsets = [0]
+    for line in text.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    doc_ends = [end for _start, end in scanned.docs]
     ns: list[str] = []
+    scopes: list[tuple[str, str, int]] = []
+    context: list[str] = []
+    contexts: list[str] = []
+    boundaries: list[int] = []
     decls: list[tuple[int, str, str, bool]] = []   # (line index, fqname, kind, private)
-    for i, line in enumerate(lines):
-        s = line.strip()
-        m_ns = re.match(r"namespace\s+([A-Za-z0-9_.]+)", s)
-        if m_ns:
-            ns.append(m_ns.group(1))
+    for i, line in enumerate(clean_lines):
+        s = code_lines[i].strip()
+        m_scope = re.match(r"(?:(?:public|noncomputable)\s+)?(namespace|section)\b\s*([^\s]*)", s)
+        if m_scope:
+            kind, name = m_scope.groups()
+            scopes.append((kind, name, len(context)))
+            context.append(lines[i])
+            if kind == "namespace":
+                ns.append(name)
+            boundaries.append(i)
             continue
-        m_end = re.match(r"end\s+([A-Za-z0-9_.]+)", s)
-        if m_end and ns and ns[-1] == m_end.group(1):
-            ns.pop()
+        if re.match(r"end\b", s):
+            if scopes:
+                kind, _name, context_len = scopes.pop()
+                del context[context_len:]
+                if kind == "namespace":
+                    ns.pop()
+            boundaries.append(i)
             continue
-        m = _DECL_RE.match(line)
+        if (not _DECL_RE.match(code_lines[i]) and
+                re.match(r"(?:public\s+)?(?:module|import|open|variable|universe|include|omit|set_option|attribute)\b", s)):
+            context_end = i + 1
+            if re.match(r"(?:variable|include|omit)\b", s):
+                indent = len(line) - len(line.lstrip())
+                while context_end < len(lines):
+                    following = clean_lines[context_end]
+                    if (following.strip() and
+                            len(following) - len(following.lstrip()) > indent):
+                        context_end += 1
+                    else:
+                        break
+            context.append("\n".join(lines[i:context_end]))
+            boundaries.append(i)
+            continue
+        # Match original identifiers, but only where the lexical code contains
+        # a declaration keyword (never inside a comment or string).
+        m = _DECL_RE.match(line) if _DECL_RE.match(code_lines[i]) else None
         if m:
             kind, name = m.group(1), m.group(2)
+            if name.startswith(('[', '{')):
+                continue  # anonymous instances have no source-level name
             is_private = bool(re.search(r"\bprivate\s+", line[:m.start(1)]))
             # `_root_.Foo` is explicitly outside the surrounding namespace;
             # retaining the marker would create a name that Lean cannot refer
@@ -572,6 +615,10 @@ def parse_lean(text: str) -> list[dict]:
             fqname = name.removeprefix("_root_.") if name.startswith("_root_.") \
                 else ".".join(ns + [name])
             decls.append((i, fqname, kind, is_private))
+            contexts.append("\n".join(context))
+            boundaries.append(i)
+            # `omit ... in` and `include ... in` apply to this command only.
+            context = [c for c in context if not re.match(r"\s*(omit|include)\b.*\bin\s*$", c)]
 
     # for each decl, find the top of a /-- … -/ doc comment sitting above it
     tops: list[int] = []
@@ -580,10 +627,11 @@ def parse_lean(text: str) -> list[dict]:
         while j >= 0 and lines[j].strip() == "":
             j -= 1
         if j >= 0 and lines[j].strip().endswith("-/"):
-            while j >= 0 and "/--" not in lines[j]:
-                j -= 1
-            if j >= 0:
-                top = j
+            index = bisect_right(doc_ends, offsets[i]) - 1
+            if index >= 0:
+                a, b = scanned.docs[index]
+                if text.startswith('/--', a) and not text[b:offsets[i]].strip():
+                    top = bisect_right(offsets, a) - 1
         tops.append(top)
 
     out: list[dict] = []
@@ -591,11 +639,15 @@ def parse_lean(text: str) -> list[dict]:
         # a decl's code stops where the NEXT decl's doc comment begins, so an
         # adjacent decl's doc doesn't leak into this one's body.
         end = tops[k + 1] if k + 1 < len(decls) else len(lines)
+        next_boundary = bisect_right(boundaries, i)
+        if next_boundary < len(boundaries):
+            end = min(end, boundaries[next_boundary])
         code = lines[i:end]
         while code and (code[-1].strip() == ""
                         or re.match(r"\s*(end|namespace)\b", code[-1])):
             code.pop()
         body = "\n".join(code)
+        body_code = scan_lean(body).code
         doc = ""
         if tops[k] < i:                             # a /-- … -/ sat above the decl
             raw = "\n".join(lines[tops[k]:i]).strip()
@@ -607,7 +659,9 @@ def parse_lean(text: str) -> list[dict]:
             "kind": kind,
             "body": body,
             "doc": doc,
-            "sorry": bool(re.search(r"\bsorry\b", body)),
+            "statement": statement_prefix(body, kind),
+            "context": contexts[k],
+            "sorry": bool(keyword_count(body_code, "sorry") or keyword_count(body_code, "admit")),
             "private": is_private,
         })
     return out
@@ -635,7 +689,7 @@ def _read_and_parse_lean(args: tuple[Path, Path]) -> tuple[str, list[dict]]:
     functions of its content, safe to run in parallel across files."""
     f, root_abs = args
     try:
-        rel = str(f.resolve().relative_to(root_abs))
+        rel = str(f.absolute().relative_to(root_abs))
     except ValueError:
         rel = str(f)
     return rel, parse_lean(f.read_text(encoding="utf-8"))
@@ -727,6 +781,7 @@ def sync(g: Graph, *, blueprint: str | None = None, lean_paths=(),
                        "generated": "lean", "author": "sync", "decl": d["fqname"],
                        "lean_status": lean_status[d["fqname"]],
                        "file": rel, "docstring": d["doc"] or None,
+                       "statement": d["statement"], "context": d["context"] or None,
                        "private": True if d.get("private") else None},
                 dry_run=dry_run)
             seen["lean"].add(nid)

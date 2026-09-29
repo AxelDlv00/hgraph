@@ -92,6 +92,9 @@ export interface LeanDecl {
   status: 'lean_ok' | 'mathlib_ok' | 'sorry' | 'empty' | null;
   file: string | null;
   code: string;
+  statement?: string | null;
+  docstring?: string | null;
+  context?: string | null;
 }
 
 export interface Dep {
