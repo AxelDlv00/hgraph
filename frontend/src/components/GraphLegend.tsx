@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { GRAPH } from '../palette';
 import { ChevronDown } from 'lucide-react';
+import { useProgress } from '../progress';
 
 /**
  * The graph modal's floating legend — ported from the original's
@@ -13,6 +14,12 @@ import { ChevronDown } from 'lucide-react';
  */
 export function GraphLegend({ mode }: { mode: 'collapsed' | 'full' }) {
   const [collapsed, setCollapsed] = useState(true);
+  const progress = useProgress();
+  const linkLabels: Record<string, string> = {
+    blocked: 'no resolved link', ready: 'dependencies linked', formalized: 'source annotation',
+    notready: 'dependencies unlinked', incomplete: 'link needs review',
+    local: 'linked source', done: 'source and dependencies linked',
+  };
   return (
     <div className={`gm-float gm-legend${collapsed ? ' collapsed' : ''}`}>
       <button
@@ -52,11 +59,11 @@ export function GraphLegend({ mode }: { mode: 'collapsed' | 'full' }) {
       ).map(([k, label]) => (
         <div className="lg" key={k}>
           <i className="lgb" style={{ borderColor: GRAPH.border[k] }} />
-          {label}
+          {progress ? label : linkLabels[k]}
         </div>
       ))}
 
-      <div className="lgsec">Proof (fill)</div>
+      <div className="lgsec">{progress ? 'Proof (fill)' : 'Source links (fill)'}</div>
       {(
         [
           ['notready', 'not ready'],
@@ -68,7 +75,7 @@ export function GraphLegend({ mode }: { mode: 'collapsed' | 'full' }) {
       ).map(([k, label]) => (
         <div className="lg" key={k}>
           <i className="lgf" style={{ background: GRAPH.fill[k] }} />
-          {label}
+          {progress ? label : linkLabels[k]}
         </div>
       ))}
 

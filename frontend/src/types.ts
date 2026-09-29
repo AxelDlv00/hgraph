@@ -27,10 +27,11 @@ export interface ProjectStats {
   done: number;
   partial: number;
   todo: number;
-  pct: number;
+  pct: number | null;
 }
 
 export interface ProjectCardData {
+  progress?: boolean;
   name: string;
   /** the frontend hash-routes to #/<root> — there is no separate dashboard file */
   root: string;
@@ -236,6 +237,7 @@ export interface BibEntry {
 }
 
 export interface ProjectData {
+  progress?: boolean;
   title: string;
   mode?: 'doc' | 'list';
   entries: Entry[];

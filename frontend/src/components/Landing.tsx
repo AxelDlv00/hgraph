@@ -10,7 +10,9 @@ function totals(data: SiteData) {
   const projects = data.sections.flatMap((s) => s.projects);
   const statements = projects.reduce((n, p) => n + p.stats.statements, 0);
   const done = projects.reduce((n, p) => n + p.stats.done, 0);
-  return { projects: projects.length, statements, done, pct: statements ? Math.round((100 * done) / statements) : 0 };
+  const progress = projects.every((p) => p.progress !== false);
+  return { projects: projects.length, statements, done,
+    pct: progress ? (statements ? Math.round((100 * done) / statements) : 0) : null };
 }
 
 export function Landing({ data }: { data: SiteData }) {
@@ -45,12 +47,12 @@ export function Landing({ data }: { data: SiteData }) {
                 <span className="pstat">
                   <b>{t.statements}</b> statements
                 </span>
-                <span className="pstat">
+                {t.pct !== null && <span className="pstat">
                   <b>{t.pct}%</b> formalized
                   <span className="pbar">
                     <i style={{ width: `${t.pct}%` }} />
                   </span>
-                </span>
+                </span>}
               </>
             )}
           </div>

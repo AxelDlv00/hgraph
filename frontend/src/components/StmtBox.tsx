@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { useProgress, sourceLinkLabel } from '../progress';
 import type { StmtBlock, RefEntry, Dep } from '../types';
 import { type CiteNums } from '../latex';
 import { LeanSource } from './LeanSource';
@@ -126,6 +127,7 @@ export function StmtBox({
   repo: string | null;
 }) {
   const en = b.enrich;
+  const progress = useProgress();
   const st = en ? en.lean_status : 'empty';
   const uses = en?.deps || [];
   return (
@@ -150,7 +152,7 @@ export function StmtBox({
               sketch
             </span>
           )}
-          {en && <span className={`b b-${st}`}>{st.replace('_', ' ')}</span>}
+          {en && <span className={`b b-${st}`}>{progress ? st.replace('_', ' ') : sourceLinkLabel(st)}</span>}
         </span>
       </div>
       <Tex as="div" className="sbody" text={b.body} macros={macros} refs={refs} cites={cites} onNavigate={onNavigate} onCite={onCite} />

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useProgress, sourceLinkLabel } from '../progress';
 import type { Chapter, ContentTab, RefEntry } from '../types';
 import { chapterTree } from '../chapterTree';
 import { plainTex } from '../latex';
@@ -63,6 +64,7 @@ export function Toc({
     setOpenCh(next);
   };
 
+  const progress = useProgress();
   return (
     <nav className="doc-nav" id="blueprint-navigation" aria-label="Blueprint navigation">
       <input
@@ -78,7 +80,7 @@ export function Toc({
             className={`navchip${statusFilter.has(s) ? ' on' : ''}`}
             onClick={() => onToggleStatus(s)}
           >
-            {s.replace('_', ' ')}
+            {progress ? s.replace('_', ' ') : sourceLinkLabel(s)}
           </span>
         ))}
       </div>
@@ -90,7 +92,7 @@ export function Toc({
             onClick={() => onSetView(n.view)}
           >
             <span className="ni">{n.icon}</span>
-            {n.label}
+            {!progress && n.view === 'summary' ? 'Source links' : n.label}
           </a>
         ))}
         {customTabs.map((c) => (

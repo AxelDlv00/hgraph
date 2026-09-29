@@ -3,6 +3,7 @@ import { chapterTree } from '../chapterTree';
 import { Math as Tex } from './Tex';
 import { STATUS, type Status } from '../palette';
 import { ChapterContentsTree, StatementSquares } from './ChapterContents';
+import { useProgress, sourceLinkLabel } from '../progress';
 
 /** The "Overview" landing page for a multi-chapter blueprint — a title page
  * (`\maketitle`) + a status-color legend + every chapter, progressively
@@ -28,6 +29,7 @@ export function Overview({
   onGotoChapter: (chapterIndex: number) => void;
   onGotoSection: (chapterIndex: number, num: string) => void;
 }) {
+  const progress = useProgress();
   const rows = chapters
     .map((ch, i) => {
       const secs = chapterTree(ch);
@@ -55,7 +57,7 @@ export function Overview({
           {(['mathlib_ok', 'lean_ok', 'sorry', 'empty'] as Status[]).map((k) => (
             <span key={k}>
               <i className="sw" style={{ background: STATUS[k].fg }} />
-              {STATUS[k].label}
+              {progress ? STATUS[k].label : sourceLinkLabel(k)}
             </span>
           ))}
         </div>

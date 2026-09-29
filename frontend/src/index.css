@@ -775,7 +775,10 @@ a {
   .doc-outline { display: none; }
   .panel-rail-right { display: none; }
 }
+.mobile-project-nav { display: none; }
 @media (max-width: 900px) {
+  .mobile-project-nav { display: block; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  .mobile-project-nav select { width: 100%; min-width: 0; padding: 8px; font: inherit; color: inherit; background: var(--paper, white); border: 1px solid var(--line); border-radius: 4px; }
   .doc-wrap { grid-template-columns: 1fr; }
   .doc-nav { display: none; }
   .panel-rail-left { display: none; }

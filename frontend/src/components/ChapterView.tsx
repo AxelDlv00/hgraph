@@ -6,6 +6,7 @@ import { plainTex } from '../latex';
 import type { CiteNums } from '../latex';
 import { chapterTree } from '../chapterTree';
 import { ChapterContentsTree } from './ChapterContents';
+import { useProgress } from '../progress';
 
 function ChapterOverview({
   ch,
@@ -18,6 +19,7 @@ function ChapterOverview({
   onGoto: (id: string) => void;
   onGotoSection: (num: string) => void;
 }) {
+  const progress = useProgress();
   const stmts = ch.blocks.filter((b): b is StmtBlock => b.t === 'stmt');
   const sections = chapterTree(ch);
   if (!stmts.length && !sections.length) return null;
@@ -26,11 +28,12 @@ function ChapterOverview({
     const s = b.enrich ? b.enrich.lean_status : 'empty';
     cc[s] = (cc[s] || 0) + 1;
   });
-  const pct = stmts.length ? Math.round((100 * (cc.lean_ok + cc.mathlib_ok)) / stmts.length) : 0;
+  const pct = progress && stmts.length ? Math.round((100 * (cc.lean_ok + cc.mathlib_ok)) / stmts.length) : null;
   return (
     <details className="choverview" open>
       <summary>
-        Chapter contents · <b>{stmts.length}</b> statements · <b>{pct}%</b> formalized
+        Chapter contents · <b>{stmts.length}</b> statements
+        {pct !== null && <> · <b>{pct}%</b> formalized</>}
       </summary>
       <ChapterContentsTree
         sections={sections}
